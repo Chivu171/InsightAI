@@ -58,7 +58,7 @@ if prompt := st.chat_input("Nhập câu hỏi tại đây..."):
 
     # Generate response
     with st.chat_message("assistant"):
-        if st.session_state.rag.index is None:
+        if st.session_state.rag.vectorstore is None:
             st.warning("Vui lòng tải file và nhấn 'Re-index Data' ở sidebar trước.")
         else:
             with st.spinner("Đang tìm câu trả lời..."):

@@ -1,3 +1,4 @@
+import sys
 import os
 import pickle
 import faiss
@@ -5,7 +6,23 @@ import numpy as np
 import google.generativeai as genai
 from dotenv import load_dotenv
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
+
+try:
+    import langchain
+    print(f"DEBUG: Langchain found at {langchain.__path__}")
+    from langchain.retrievers import ParentDocumentRetriever
+    print("DEBUG: ParentDocumentRetriever imported successfully")
+except ImportError as e:
+    print(f"DEBUG: ImportError during langchain setup: {e}")
+    print(f"DEBUG: sys.path is {sys.path}")
+    # Fallback or re-raise
+    raise
+from langchain.storage import InMemoryStore
+from langchain_community.vectorstores import FAISS
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.documents import Document
 
 class RAGEngine:
     def __init__(self, model_name="all-MiniLM-L6-v2", gemini_model="models/gemini-flash-latest"):
@@ -17,9 +34,12 @@ class RAGEngine:
         else:
             self.llm = None
         
-        self.embed_model = SentenceTransformer(model_name)
-        self.index = None
-        self.chunks = None
+        self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        self.vectorstore = None
+        self.docstore = InMemoryStore()
+        self.retriever = None
+        self.parent_splitter = SemanticChunker(self.embeddings)
+        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=20)
 
     def extract_text(self, file_obj):
         """Extracts text from a file object (PDF or Text)."""
@@ -44,41 +64,64 @@ class RAGEngine:
         return chunks
 
     def build_index(self, text):
-        self.chunks = self.chunk_text(text)
-        embeddings = self.embed_model.encode(self.chunks)
-        embeddings = np.array(embeddings).astype("float32")
+        """Builds the index using ParentDocumentRetriever with SemanticChunker."""
+        docs = [Document(page_content=text, metadata={"source": "uploaded_file"})]
         
-        dimension = embeddings.shape[1]
-        self.index = faiss.IndexFlatL2(dimension)
-        self.index.add(embeddings)
-        return self.index, self.chunks
+        # Initialize FAISS with an empty index if not already present
+        if self.vectorstore is None:
+            # We need at least one document to initialize FAISS, or use a dummy
+            dummy_text = "initialization"
+            self.vectorstore = FAISS.from_texts([dummy_text], self.embeddings)
+            # Remove the dummy document if possible or just proceed
+            
+        self.retriever = ParentDocumentRetriever(
+            vectorstore=self.vectorstore,
+            docstore=self.docstore,
+            child_splitter=self.child_splitter,
+            parent_splitter=None, # We'll handle parent splitting manually with SemanticChunker
+        )
+        
+        # Split using SemanticChunker first
+        parent_docs = self.parent_splitter.split_documents(docs)
+        self.retriever.add_documents(parent_docs)
+        return self.vectorstore, parent_docs
 
-    def save_index(self, index_path="vector_db/index.faiss", chunks_path="vector_db/chunks.pkl"):
-        if self.index is None or self.chunks is None:
+    def save_index(self, folder_path="vector_db"):
+        if self.vectorstore is None:
             return False
-        os.makedirs("vector_db", exist_ok=True)
-        faiss.write_index(self.index, index_path)
-        with open(chunks_path, "wb") as f:
-            pickle.dump(self.chunks, f)
+        os.makedirs(folder_path, exist_ok=True)
+        self.vectorstore.save_local(folder_path)
+        # Note: InMemoryStore is not easily serializable with pickle if it contains complex objects,
+        # but for strings/Documents it should be fine.
+        with open(os.path.join(folder_path, "docstore.pkl"), "wb") as f:
+            pickle.dump(self.docstore, f)
         return True
 
-    def load_index(self, index_path="vector_db/index.faiss", chunks_path="vector_db/chunks.pkl"):
-        if os.path.exists(index_path) and os.path.exists(chunks_path):
-            self.index = faiss.read_index(index_path)
-            with open(chunks_path, "rb") as f:
-                self.chunks = pickle.load(f)
+    def load_index(self, folder_path="vector_db"):
+        if os.path.exists(os.path.join(folder_path, "index.faiss")):
+            self.vectorstore = FAISS.load_local(folder_path, self.embeddings, allow_dangerous_deserialization=True)
+            docstore_path = os.path.join(folder_path, "docstore.pkl")
+            if os.path.exists(docstore_path):
+                with open(docstore_path, "rb") as f:
+                    self.docstore = pickle.load(f)
+            
+            self.retriever = ParentDocumentRetriever(
+                vectorstore=self.vectorstore,
+                docstore=self.docstore,
+                child_splitter=self.child_splitter,
+                parent_splitter=None,
+            )
             return True
         return False
 
     def query(self, user_query, k=3):
-        if self.index is None or self.chunks is None:
-            return "Chưa có dữ liệu. Vui lòng tải file và index trước.", []
+        if self.retriever is None:
+            # Try loading if exists
+            if not self.load_index():
+                return "Chưa có dữ liệu. Vui lòng tải file và index trước.", []
         
-        # Search
-        query_vector = self.embed_model.encode([user_query])
-        query_vector = np.array(query_vector).astype("float32")
-        distances, indices = self.index.search(query_vector, k)
-        relevant_chunks = [self.chunks[i] for i in indices[0]]
+        relevant_docs = self.retriever.invoke(user_query)
+        relevant_chunks = [doc.page_content for doc in relevant_docs]
         
         # Generate
         if not self.llm:
@@ -104,7 +147,7 @@ if __name__ == "__main__":
     # Simple CLI for testing
     rag = RAGEngine()
     if rag.load_index():
-        print(f"Loaded index with {rag.index.ntotal} vectors.")
+        print("Loaded existing index.")
     else:
         print("No index found. Please use the Streamlit app to index data.")
     

@@ -25,8 +25,8 @@ class QueryRequest(BaseModel):
 @app.get("/status")
 async def get_status():
     return {
-        "status": "ready" if rag.index is not None else "no_index",
-        "vector_count": rag.index.ntotal if rag.index else 0
+        "status": "ready" if rag.vectorstore is not None else "no_index",
+        "vector_count": rag.vectorstore.index.ntotal if rag.vectorstore else 0
     }
 
 @app.post("/upload")
@@ -43,7 +43,7 @@ async def upload_file(file: UploadFile = File(...)):
         
         return {
             "message": f"Successfully indexed {file.filename}",
-            "chunks": len(rag.chunks)
+            "status": "success"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
