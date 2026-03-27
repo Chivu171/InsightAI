@@ -33,6 +33,7 @@ with st.sidebar:
             with st.spinner("Đang xử lý dữ liệu..."):
                 text = st.session_state.rag.extract_text(uploaded_file)
                 if text:
+                    st.session_state.rag.clear_index()
                     st.session_state.rag.build_index(text)
                     st.session_state.rag.save_index()
                     st.success(f"Đã index xong từ {uploaded_file.name}!")

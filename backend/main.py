@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from rag_pipeline import RAGEngine
@@ -30,23 +30,34 @@ async def get_status():
     }
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     try:
-        # Step 1: Extract text
-        text = rag.extract_text(file.file)
-        if not text:
-            raise HTTPException(status_code=400, detail="Could not extract text from file.")
-        
-        # Step 2: Build index
-        rag.build_index(text)
-        rag.save_index()
-        
+        text = rag.extract_text(file)
+
+        if not text or not text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text.")
+
+        def process():
+            rag.clear_index()
+            rag.build_index(text)
+            rag.save_index()
+
+        background_tasks.add_task(process)
+
         return {
-            "message": f"Successfully indexed {file.filename}",
-            "status": "success"
+            "message": "File uploaded. Indexing in progress...",
+            "status": "processing"
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/progress")
+async def get_progress():
+    return {
+        "status": rag.status,
+        "progress": rag.progress
+    }
 
 @app.post("/query")
 async def query_rag(request: QueryRequest):

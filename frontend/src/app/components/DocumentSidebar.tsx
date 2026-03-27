@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { FileText, Upload, X, Search, File, FileImage, FileSpreadsheet, Trash2, ChevronLeft } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { FileText, Upload, X, Search, File, FileImage, FileSpreadsheet, Trash2, ChevronLeft, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
@@ -22,6 +22,38 @@ interface DocumentSidebarProps {
 export function DocumentSidebar({ onDocumentsChange, collapsed, onToggleCollapse }: DocumentSidebarProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [indexing, setIndexing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [indexStatus, setIndexStatus] = useState<string>("idle");
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll progress from backend
+  useEffect(() => {
+    if (indexing) {
+      pollingRef.current = setInterval(async () => {
+        try {
+          const res = await fetch("http://localhost:8000/progress");
+          const data = await res.json();
+          setProgress(data.progress);
+          setIndexStatus(data.status);
+          if (data.progress >= 100 || data.status === "done") {
+            setIndexing(false);
+            setProgress(100);
+            // Auto-hide after 2s
+            setTimeout(() => {
+              setProgress(0);
+              setIndexStatus("idle");
+            }, 2000);
+          }
+        } catch (err) {
+          console.error("Error polling progress:", err);
+        }
+      }, 500);
+    }
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [indexing]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -52,7 +84,10 @@ export function DocumentSidebar({ onDocumentsChange, collapsed, onToggleCollapse
         if (!response.ok) {
           console.error(`Failed to upload ${file.name}`);
         } else {
-          console.log(`Successfully indexed ${file.name}`);
+          console.log(`Uploaded ${file.name}, indexing started...`);
+          setIndexing(true);
+          setProgress(0);
+          setIndexStatus("processing");
         }
       } catch (error) {
         console.error(`Error uploading ${file.name}:`, error);
@@ -113,6 +148,42 @@ export function DocumentSidebar({ onDocumentsChange, collapsed, onToggleCollapse
             className="hidden"
           />
         </label>
+
+        {/* Progress Bar */}
+        {(indexing || indexStatus === "done") && (
+          <div className="mt-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                {indexStatus !== "done" && (
+                  <Loader2 className="size-3.5 text-blue-600 animate-spin" />
+                )}
+                <span className="text-xs font-medium text-zinc-700">
+                  {indexStatus === "done" ? "✅ Hoàn tất!" : "Đang index tài liệu..."}
+                </span>
+              </div>
+              <span className="text-xs font-semibold text-blue-600">{progress}%</span>
+            </div>
+            <div className="w-full h-2 bg-zinc-200 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-300 ease-out"
+                style={{
+                  width: `${progress}%`,
+                  background: indexStatus === "done"
+                    ? "linear-gradient(90deg, #22c55e, #16a34a)"
+                    : "linear-gradient(90deg, #3b82f6, #6366f1)",
+                }}
+              />
+            </div>
+            <p className="text-[11px] text-zinc-400">
+              {progress < 30 && "Đang trích xuất dữ liệu..."}
+              {progress >= 30 && progress < 50 && "Đang khởi tạo vector store..."}
+              {progress >= 50 && progress < 70 && "Đang phân tích ngữ nghĩa..."}
+              {progress >= 70 && progress < 85 && "Đang tạo parent chunks..."}
+              {progress >= 85 && progress < 100 && "Đang lưu index..."}
+              {progress >= 100 && "Index hoàn tất!"}
+            </p>
+          </div>
+        )}
 
         {/* Search */}
         {documents.length > 0 && (

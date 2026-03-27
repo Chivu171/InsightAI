@@ -1,7 +1,8 @@
 sentence-transformers
+rank-bm25
 numpy
 faiss-cpu
-google-generativeai
+google-genai
 python-dotenv
 streamlit
 pypdf

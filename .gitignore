@@ -46,3 +46,5 @@ backend/vector_db/
 .DS_Store
 Thumbs.db
 frontend/package-lock.json
+documents/Dense Passage Retrieval for Open-Domain Question Answering.pdf
+documents/2210.11934v2.pdf
