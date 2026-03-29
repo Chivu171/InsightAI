@@ -2,25 +2,25 @@
 
 :root {
   --font-size: 16px;
-  --background: #ffffff;
+  --background: #f7f8fc;
   --foreground: oklch(0.145 0 0);
   --card: #ffffff;
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
+  --primary: #0f172a;
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
+  --secondary: #eef4ff;
   --secondary-foreground: #030213;
-  --muted: #ececf0;
-  --muted-foreground: #717182;
-  --accent: #e9ebef;
+  --muted: #eef2f7;
+  --muted-foreground: #667085;
+  --accent: #f4f6fb;
   --accent-foreground: #030213;
   --destructive: #d4183d;
   --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
+  --border: rgba(15, 23, 42, 0.09);
   --input: transparent;
-  --input-background: #f3f3f5;
+  --input-background: #f8fafc;
   --switch-background: #cbced4;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
@@ -126,6 +126,8 @@
 
   body {
     @apply bg-background text-foreground;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
 
   /**
@@ -135,24 +137,28 @@
 
   html {
     font-size: var(--font-size);
+    font-family: "Avenir Next", "Segoe UI", sans-serif;
   }
 
   h1 {
     font-size: var(--text-2xl);
     font-weight: var(--font-weight-medium);
     line-height: 1.5;
+    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   }
 
   h2 {
     font-size: var(--text-xl);
     font-weight: var(--font-weight-medium);
     line-height: 1.5;
+    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   }
 
   h3 {
     font-size: var(--text-lg);
     font-weight: var(--font-weight-medium);
     line-height: 1.5;
+    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   }
 
   h4 {

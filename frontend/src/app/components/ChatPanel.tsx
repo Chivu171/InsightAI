@@ -1,5 +1,20 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Loader2, Sparkles, ChevronRight, FileText, RotateCcw, MessageCircle, Lightbulb, Minimize2 } from "lucide-react";
+import {
+  Send,
+  Bot,
+  User,
+  Loader2,
+  Sparkles,
+  ChevronRight,
+  FileText,
+  RotateCcw,
+  MessageCircle,
+  Lightbulb,
+  Minimize2,
+  Menu,
+  ArrowUpRight,
+  LibraryBig,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
@@ -15,6 +30,21 @@ export interface Citation {
   documentId: string;
   documentName: string;
   page?: number;
+  chunkId?: string;
+  chunkIndex?: number;
+  fileType?: string;
+  uploadedAt?: string;
+  snippet: string;
+}
+
+interface CitationApiResponse {
+  document_id?: string;
+  document_name?: string;
+  page?: number;
+  chunk_id?: string;
+  chunk_index?: number;
+  file_type?: string;
+  uploaded_at?: string;
   snippet: string;
 }
 
@@ -33,28 +63,16 @@ interface ChatPanelProps {
   onToggleSidebar?: () => void;
 }
 
-export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed, onToggleSidebar }: ChatPanelProps) {
+export function ChatPanel({
+  documentCount = 0,
+  sidebarCollapsed,
+  onToggleSidebar,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const generateMockCitations = (): Citation[] => {
-    if (documents.length === 0) return [];
-    
-    const numCitations = Math.min(Math.floor(Math.random() * 2) + 1, documents.length);
-    const selectedDocs = [...documents]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, numCitations);
-    
-    return selectedDocs.map(doc => ({
-      documentId: doc.id,
-      documentName: doc.name,
-      page: Math.floor(Math.random() * 10) + 1,
-      snippet: "...nội dung liên quan được trích xuất từ tài liệu này..."
-    }));
-  };
 
   const handleSend = async (customInput?: string) => {
     const messageText = customInput || input.trim();
@@ -85,26 +103,31 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
       }
 
       const data = await response.json();
-      
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
         content: data.answer,
         timestamp: new Date(),
-        citations: data.sources.map((source: string, idx: number) => ({
-          documentId: `source-${idx}`,
-          documentName: "Tài liệu trích dẫn",
-          snippet: source,
+        citations: data.sources.map((source: CitationApiResponse, idx: number) => ({
+          documentId: source.document_id || `source-${idx}`,
+          documentName: source.document_name || "Tài liệu trích dẫn",
+          page: source.page,
+          chunkId: source.chunk_id,
+          chunkIndex: source.chunk_index,
+          fileType: source.file_type,
+          uploadedAt: source.uploaded_at,
+          snippet: source.snippet,
         })),
       };
-      
+
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
       console.error("Error calling query API:", error);
       const errorMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
-        content: "Xin lỗi, đã có lỗi xảy ra khi kết nối với máy chủ. Vui lòng đảm bảo Backend đang chạy.",
+        content:
+          "Xin lỗi, đã có lỗi xảy ra khi kết nối với máy chủ. Vui lòng đảm bảo Backend đang chạy.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -113,18 +136,8 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
     }
   };
 
-  const getExampleResponse = (query: string): string => {
-    const responses = [
-      "Dựa trên nội dung tài liệu, tôi có thể tóm tắt các điểm chính như sau: Đầu tiên, vấn đề được đề cập xoay quanh các khía cạnh quan trọng cần lưu ý. Thứ hai, có một số yếu tố then chốt ảnh hưởng đến kết quả cuối cùng. Cuối cùng, các khuyến nghị được đưa ra nhằm tối ưu hóa quy trình.",
-      "Từ những tài liệu bạn cung cấp, tôi thấy rằng có một số mẫu chung xuất hiện xuyên suốt. Các tài liệu đều nhấn mạnh tầm quan trọng của việc lập kế hoạch cẩn thận và thực hiện có hệ thống. Ngoài ra, còn có những lưu ý đặc biệt về các rủi ro tiềm ẩn cần tránh.",
-      "Câu hỏi thú vị! Theo như những gì tôi tìm thấy trong tài liệu, vấn đề này có nhiều góc độ để xem xét. Một mặt, có những lợi ích rõ ràng được nêu bật. Mặt khác, cũng tồn tại một số thách thức cần giải quyết. Tổng quan lại, cách tiếp cận cân bằng sẽ mang lại kết quả tốt nhất.",
-      "Để trả lời câu hỏi này, tôi đã tham khảo các phần liên quan trong tài liệu của bạn. Thông tin chính cho thấy rằng các bước thực hiện cần được sắp xếp theo một trình tự logic. Mỗi giai đoạn đều có những yêu cầu riêng và cần sự chú ý đặc biệt.",
-    ];
-    return responses[Math.floor(Math.random() * responses.length)];
-  };
-
   const handleQuickAction = (messageId: string, action: string) => {
-    const originalMessage = messages.find(m => m.id === messageId);
+    const originalMessage = messages.find((message) => message.id === messageId);
     if (!originalMessage) return;
 
     let actionPrompt = "";
@@ -138,18 +151,14 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
       case "example":
         actionPrompt = "Cho ví dụ cụ thể về nội dung vừa nói";
         break;
-      case "regenerate":
-        // Just trigger a new response with same query
+      case "regenerate": {
         const previousUserMessage = messages[messages.indexOf(originalMessage) - 1];
-        if (previousUserMessage) {
-          handleSend(previousUserMessage.content);
-        }
+        if (previousUserMessage) handleSend(previousUserMessage.content);
         return;
+      }
     }
-    
-    if (actionPrompt) {
-      handleSend(actionPrompt);
-    }
+
+    if (actionPrompt) handleSend(actionPrompt);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -165,81 +174,120 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
     }
   }, [messages]);
 
+  const suggestedPrompts =
+    documentCount > 0
+      ? [
+          "Tóm tắt 3 điểm quan trọng nhất từ bộ tài liệu này",
+          "So sánh các thông tin chính giữa những tài liệu đã tải lên",
+          "Liệt kê các rủi ro, cơ hội hoặc insight đáng chú ý",
+        ]
+      : [
+          "Tôi nên tải loại tài liệu nào để bắt đầu?",
+          "Ứng dụng này có thể hỗ trợ những kiểu câu hỏi nào?",
+          "Hướng dẫn tôi chuẩn bị bộ tài liệu cho AI phân tích",
+        ];
+
   return (
-    <div className="h-full flex flex-col bg-white">
-      {/* Header */}
-      <div className="p-4 border-b border-zinc-200">
-        <div className="flex items-center gap-3">
-          {sidebarCollapsed && (
+    <div className="flex h-full flex-col bg-transparent">
+      <div className="border-b border-zinc-200/70 px-4 py-4 md:px-8 md:py-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
             <button
               onClick={onToggleSidebar}
-              className="size-9 rounded-lg hover:bg-zinc-100 flex items-center justify-center transition-colors"
+              className="mt-1 flex size-10 shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white/80 text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
               title="Mở sidebar"
             >
-              <ChevronRight className="size-5 text-zinc-600" />
+              {sidebarCollapsed ? <ChevronRight className="size-4" /> : <Menu className="size-4" />}
             </button>
-          )}
-          <div className="size-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-            <Sparkles className="size-5 text-white" />
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0f172a_0%,#0369a1_100%)] text-white shadow-lg shadow-sky-500/20">
+              <Sparkles className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-700/80">
+                Insight Workspace
+              </p>
+              <h2 className="mt-1 text-2xl font-semibold text-zinc-950">AI Assistant</h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                {documentCount > 0
+                  ? `Đang kết nối với ${documentCount} tài liệu để trả lời theo ngữ cảnh`
+                  : "Tải tài liệu lên để bắt đầu hỏi đáp, tóm tắt và truy xuất insight"}
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="font-semibold text-zinc-900">AI Assistant</h2>
-            <p className="text-xs text-zinc-500">
-              {documentCount > 0 
-                ? `Đã sẵn sàng trả lời về ${documentCount} tài liệu` 
-                : "Sẵn sàng trợ giúp bạn"}
-            </p>
+
+          <div className="hidden items-center gap-2 md:flex">
+            <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
+              <LibraryBig className="mr-1 size-3.5" />
+              {documentCount} tài liệu
+            </Badge>
+            <Badge className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50">
+              Sẵn sàng phân tích
+            </Badge>
           </div>
         </div>
       </div>
 
-      {/* Messages */}
-      <ScrollArea className="flex-1 p-4 min-h-0" ref={scrollAreaRef}>
+      <ScrollArea className="min-h-0 flex-1 px-4 py-4 md:px-8 md:py-6" ref={scrollAreaRef}>
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-4">
-            <div className="size-20 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center mb-4">
-              <Bot className="size-10 text-blue-600" />
-            </div>
-            <h3 className="font-semibold text-zinc-900 mb-2">Bắt đầu cuộc trò chuyện</h3>
-            <p className="text-sm text-zinc-500 max-w-md">
-              {documentCount > 0
-                ? "Hỏi tôi bất cứ điều gì về các tài liệu bạn đã tải lên. Tôi có thể tóm tắt, trích xuất thông tin, hoặc trả lời câu hỏi chi tiết."
-                : "Tải lên tài liệu ở bên trái để bắt đầu phân tích và đặt câu hỏi."}
-            </p>
-            {documentCount > 0 && (
-              <div className="mt-6 flex flex-wrap gap-2 justify-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setInput("Tóm tắt nội dung chính của các tài liệu");
-                    textareaRef.current?.focus();
-                  }}
-                >
-                  Tóm tắt tài liệu
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setInput("Những điểm quan trọng nhất là gì?");
-                    textareaRef.current?.focus();
-                  }}
-                >
-                  Điểm chính
-                </Button>
+          <div className="mx-auto flex h-full w-full max-w-4xl flex-col justify-center">
+            <div className="rounded-[32px] border border-white/80 bg-[linear-gradient(145deg,rgba(255,255,255,0.94)_0%,rgba(240,249,255,0.92)_52%,rgba(255,251,235,0.86)_100%)] p-6 shadow-[0_16px_50px_rgba(15,23,42,0.08)] md:p-8">
+              <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+                <div className="max-w-2xl">
+                  <div className="mb-4 flex size-18 items-center justify-center rounded-full bg-[linear-gradient(135deg,#e0f2fe_0%,#fef3c7_100%)]">
+                    <Bot className="size-9 text-sky-700" />
+                  </div>
+                  <h3 className="text-3xl font-semibold leading-tight text-zinc-950 md:text-4xl">
+                    Hỏi đáp trên tài liệu theo cách rõ ràng và có trích dẫn.
+                  </h3>
+                  <p className="mt-3 max-w-xl text-sm leading-7 text-zinc-600 md:text-base">
+                    {documentCount > 0
+                      ? "Kho tài liệu đã sẵn sàng. Bạn có thể yêu cầu tóm tắt, đối chiếu điểm khác nhau, rút insight hoặc truy xuất câu trả lời chi tiết."
+                      : "Bắt đầu bằng cách tải tài liệu ở khung bên trái. Khi index xong, assistant sẽ trả lời dựa trên nội dung bạn cung cấp."}
+                  </p>
+                </div>
+
+                <div className="grid gap-3 text-left sm:grid-cols-2 md:w-[22rem] md:grid-cols-1">
+                  <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
+                    <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Trạng thái</p>
+                    <p className="mt-2 text-lg font-semibold text-zinc-950">
+                      {documentCount > 0 ? "Context đã sẵn sàng" : "Chờ tài liệu đầu vào"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
+                    <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Khả năng</p>
+                    <p className="mt-2 text-lg font-semibold text-zinc-950">Tóm tắt, so sánh, trích dẫn</p>
+                  </div>
+                </div>
               </div>
-            )}
+
+              <div className="mt-8 grid gap-3 md:grid-cols-3">
+                {suggestedPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => {
+                      setInput(prompt);
+                      textareaRef.current?.focus();
+                    }}
+                    className="group rounded-[24px] border border-white/80 bg-white/80 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-md"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium leading-6 text-zinc-800">{prompt}</p>
+                      <ArrowUpRight className="size-4 shrink-0 text-zinc-300 transition-colors group-hover:text-sky-600" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="mx-auto max-w-4xl space-y-6">
             {messages.map((message, index) => (
               <div
                 key={message.id}
                 className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}
               >
                 <Avatar className="size-8 shrink-0">
-                  <AvatarFallback className={message.role === "user" ? "bg-blue-600" : "bg-purple-600"}>
+                  <AvatarFallback className={message.role === "user" ? "bg-zinc-950" : "bg-sky-700"}>
                     {message.role === "user" ? (
                       <User className="size-4 text-white" />
                     ) : (
@@ -247,24 +295,20 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
                     )}
                   </AvatarFallback>
                 </Avatar>
-                <div
-                  className={`flex-1 ${
-                    message.role === "user" ? "flex justify-end" : ""
-                  }`}
-                >
+                <div className={`flex-1 ${message.role === "user" ? "flex justify-end" : ""}`}>
                   <div className={message.role === "user" ? "flex flex-col items-end" : ""}>
                     <div
-                      className={`inline-block max-w-[85%] px-4 py-2.5 rounded-2xl ${
+                      className={`inline-block max-w-[88%] rounded-[24px] px-4 py-3 ${
                         message.role === "user"
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-900"
+                          ? "bg-[linear-gradient(135deg,#0f172a_0%,#0369a1_100%)] text-white shadow-lg shadow-sky-500/15"
+                          : "border border-white/80 bg-white/80 text-zinc-900 shadow-sm backdrop-blur"
                       }`}
                     >
                       {message.role === "user" ? (
-                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        <p className="whitespace-pre-wrap text-sm leading-7">{message.content}</p>
                       ) : (
                         <div className="prose prose-sm max-w-none prose-zinc">
-                          <ReactMarkdown 
+                          <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[rehypeKatex]}
                           >
@@ -274,46 +318,64 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
                       )}
                     </div>
 
-                    {/* Citations */}
-                    {message.role === "assistant" && message.citations && message.citations.length > 0 && (
-                      <div className="mt-3 space-y-2 max-w-[85%]">
-                        <div className="text-xs font-medium text-zinc-500 flex items-center gap-1.5">
-                          <FileText className="size-3.5" />
-                          Nguồn tham khảo:
-                        </div>
-                        {message.citations.map((citation, idx) => (
-                          <div
-                            key={idx}
-                            className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 hover:bg-blue-100 transition-colors cursor-pointer"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium text-blue-900 truncate">
-                                  {citation.documentName}
-                                </p>
-                                <p className="text-xs text-blue-700 mt-0.5 line-clamp-2">
-                                  {citation.snippet}
-                                </p>
-                              </div>
-                              {citation.page && (
-                                <Badge variant="secondary" className="text-xs shrink-0">
-                                  Trang {citation.page}
-                                </Badge>
-                              )}
-                            </div>
+                    {message.role === "assistant" &&
+                      message.citations &&
+                      message.citations.length > 0 && (
+                        <div className="mt-3 max-w-[88%] space-y-2">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+                            <FileText className="size-3.5" />
+                            Nguồn tham khảo:
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          {message.citations.map((citation, idx) => (
+                            <div
+                              key={idx}
+                              className="cursor-pointer rounded-2xl border border-sky-100 bg-sky-50/80 p-3 transition-colors hover:bg-sky-100/80"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-medium text-sky-950">
+                                    {citation.documentName}
+                                  </p>
+                                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                    {citation.fileType && (
+                                      <Badge
+                                        variant="secondary"
+                                        className="rounded-full border border-sky-200 bg-white text-[10px] text-sky-700"
+                                      >
+                                        {citation.fileType.replace(".", "").toUpperCase()}
+                                      </Badge>
+                                    )}
+                                    {citation.chunkIndex && (
+                                      <span className="text-[11px] text-sky-700/80">
+                                        Chunk {citation.chunkIndex}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-sky-800">
+                                    {citation.snippet}
+                                  </p>
+                                </div>
+                                {citation.page && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="shrink-0 rounded-full border border-sky-200 bg-white text-xs text-sky-700"
+                                  >
+                                    Trang {citation.page}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
-                    {/* Quick Actions */}
                     {message.role === "assistant" && index === messages.length - 1 && !isLoading && (
-                      <div className="mt-3 flex flex-wrap gap-2 max-w-[85%]">
+                      <div className="mt-3 flex max-w-[88%] flex-wrap gap-2">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleQuickAction(message.id, "explain")}
-                          className="text-xs h-7 gap-1.5"
+                          className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <MessageCircle className="size-3" />
                           Giải thích thêm
@@ -322,7 +384,7 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
                           variant="outline"
                           size="sm"
                           onClick={() => handleQuickAction(message.id, "shorter")}
-                          className="text-xs h-7 gap-1.5"
+                          className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <Minimize2 className="size-3" />
                           Ngắn gọn hơn
@@ -331,7 +393,7 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
                           variant="outline"
                           size="sm"
                           onClick={() => handleQuickAction(message.id, "example")}
-                          className="text-xs h-7 gap-1.5"
+                          className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <Lightbulb className="size-3" />
                           Ví dụ
@@ -340,7 +402,7 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
                           variant="outline"
                           size="sm"
                           onClick={() => handleQuickAction(message.id, "regenerate")}
-                          className="text-xs h-7 gap-1.5"
+                          className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <RotateCcw className="size-3" />
                           Tạo lại
@@ -348,7 +410,7 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
                       </div>
                     )}
 
-                    <p className="text-xs text-zinc-400 mt-1 px-1">
+                    <p className="mt-1 px-1 text-xs text-zinc-400">
                       {message.timestamp.toLocaleTimeString("vi-VN", {
                         hour: "2-digit",
                         minute: "2-digit",
@@ -358,15 +420,19 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
                 </div>
               </div>
             ))}
+
             {isLoading && (
               <div className="flex gap-3">
                 <Avatar className="size-8 shrink-0">
-                  <AvatarFallback className="bg-purple-600">
+                  <AvatarFallback className="bg-sky-700">
                     <Bot className="size-4 text-white" />
                   </AvatarFallback>
                 </Avatar>
-                <div className="bg-zinc-100 px-4 py-3 rounded-2xl">
-                  <Loader2 className="size-4 text-zinc-600 animate-spin" />
+                <div className="rounded-[24px] border border-white/80 bg-white/80 px-4 py-3 shadow-sm">
+                  <div className="flex items-center gap-2 text-sm text-zinc-500">
+                    <Loader2 className="size-4 animate-spin text-sky-700" />
+                    AI đang tổng hợp câu trả lời...
+                  </div>
                 </div>
               </div>
             )}
@@ -374,34 +440,45 @@ export function ChatPanel({ documentCount = 0, documents = [], sidebarCollapsed,
         )}
       </ScrollArea>
 
-      {/* Input */}
-      <div className="p-4 border-t border-zinc-200">
-        <div className="flex gap-3">
-          <div className="flex-1 relative">
+      <div className="border-t border-zinc-200/70 bg-white/50 px-4 py-4 backdrop-blur-xl md:px-8 md:py-5">
+        <div className="mx-auto max-w-4xl">
+          <div className="relative rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
+            <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
+              <Badge className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600 hover:bg-zinc-50">
+                Enter để gửi
+              </Badge>
+              <Badge className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600 hover:bg-zinc-50">
+                Shift + Enter xuống dòng
+              </Badge>
+              {documentCount > 0 && (
+                <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
+                  Đang dùng {documentCount} tài liệu làm ngữ cảnh
+                </Badge>
+              )}
+            </div>
+
             <Textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Đặt câu hỏi về tài liệu của bạn..."
-              className="min-h-[52px] max-h-32 resize-none pr-12"
+              className="min-h-[120px] max-h-44 rounded-[22px] border-zinc-200/80 bg-zinc-50/70 px-4 py-3 pr-14 text-sm leading-7 shadow-inner"
               disabled={isLoading}
             />
-            <div className="absolute bottom-2 right-2">
+
+            <div className="absolute bottom-6 right-6">
               <Button
                 size="sm"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || isLoading}
-                className="size-8 p-0"
+                className="size-10 rounded-2xl bg-zinc-950 p-0 hover:bg-zinc-800"
               >
                 <Send className="size-4" />
               </Button>
             </div>
           </div>
         </div>
-        <p className="text-xs text-zinc-400 mt-2 text-center">
-          Nhấn Enter để gửi, Shift + Enter để xuống dòng
-        </p>
       </div>
     </div>
   );

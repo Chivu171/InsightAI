@@ -70,5 +70,14 @@ if prompt := st.chat_input("Nhập câu hỏi tại đây..."):
                 # Expander for sources
                 if sources:
                     with st.expander("Xem nguồn trích dẫn"):
-                        for i, chunk in enumerate(sources):
-                            st.info(f"Nguồn {i+1}: {chunk}")
+                        for i, source in enumerate(sources):
+                            if isinstance(source, dict):
+                                title = source.get("document_name", "Tài liệu không rõ tên")
+                                page = source.get("page")
+                                snippet = source.get("snippet", "")
+                                label = f"Nguồn {i+1}: {title}"
+                                if page:
+                                    label += f" · Trang {page}"
+                                st.info(f"{label}\n\n{snippet}")
+                            else:
+                                st.info(f"Nguồn {i+1}: {source}")

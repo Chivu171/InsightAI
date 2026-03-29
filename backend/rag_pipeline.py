@@ -2,6 +2,7 @@ import sys
 import os
 import pickle
 import re
+from datetime import datetime, timezone
 import faiss
 import numpy as np
 from google import genai
@@ -89,6 +90,64 @@ class RAGEngine:
             content = real_file.read()
             return content.decode("utf-8") if isinstance(content, bytes) else content
 
+    def extract_documents(self, file_obj) -> list[Document]:
+        """Extract one or more LangChain documents with metadata preserved."""
+        filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", "uploaded_file")
+        real_file = getattr(file_obj, "file", file_obj)
+        document_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", os.path.splitext(filename)[0]).strip("_") or "uploaded_file"
+        uploaded_at = datetime.now(timezone.utc).isoformat()
+        extension = os.path.splitext(filename)[1].lower()
+
+        if hasattr(real_file, "seek"):
+            real_file.seek(0)
+
+        if extension == ".pdf":
+            reader = PdfReader(real_file)
+            page_documents: list[Document] = []
+            total_pages = len(reader.pages)
+
+            for page_index, page in enumerate(reader.pages, start=1):
+                page_text = (page.extract_text() or "").strip()
+                if not page_text:
+                    continue
+
+                page_documents.append(
+                    Document(
+                        page_content=page_text,
+                        metadata={
+                            "document_id": document_id,
+                            "document_name": filename,
+                            "file_type": extension or "pdf",
+                            "page": page_index,
+                            "total_pages": total_pages,
+                            "uploaded_at": uploaded_at,
+                        },
+                    )
+                )
+
+            return page_documents
+
+        content = real_file.read()
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
+        text = (text or "").strip()
+
+        if not text:
+            return []
+
+        return [
+            Document(
+                page_content=text,
+                metadata={
+                    "document_id": document_id,
+                    "document_name": filename,
+                    "file_type": extension or "text",
+                    "page": None,
+                    "total_pages": None,
+                    "uploaded_at": uploaded_at,
+                },
+            )
+        ]
+
     def chunk_text(self, text, chunk_size=500, overlap=100):
         chunks = []
         start = 0
@@ -101,11 +160,29 @@ class RAGEngine:
     # ------------------------------------------------------------------ #
     #  Indexing
     # ------------------------------------------------------------------ #
-    def build_index(self, text):
+    def build_index(self, text_or_docs):
         self.status = "processing"
         self.progress = 10
 
-        docs = [Document(page_content=text, metadata={"source": "uploaded_file"})]
+        if isinstance(text_or_docs, str):
+            docs = [
+                Document(
+                    page_content=text_or_docs,
+                    metadata={
+                        "document_id": "uploaded_file",
+                        "document_name": "uploaded_file",
+                        "file_type": "text",
+                        "page": None,
+                        "total_pages": None,
+                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            ]
+        else:
+            docs = text_or_docs
+
+        if not docs:
+            raise ValueError("No documents available for indexing.")
 
         self.progress = 30
 
@@ -125,6 +202,15 @@ class RAGEngine:
         self.progress = 60
 
         parent_docs = self.parent_splitter.split_documents(docs)
+
+        for chunk_index, parent_doc in enumerate(parent_docs, start=1):
+            metadata = dict(parent_doc.metadata)
+            document_id = metadata.get("document_id", "uploaded_file")
+            page = metadata.get("page")
+            page_label = f"p{page}" if page is not None else "p0"
+            metadata["chunk_index"] = chunk_index
+            metadata["chunk_id"] = f"{document_id}_{page_label}_c{chunk_index}"
+            parent_doc.metadata = metadata
 
         self.progress = 70
 
@@ -256,6 +342,26 @@ class RAGEngine:
 
         return [doc for _, doc in scored_docs[:top_k]]
 
+    @staticmethod
+    def _build_citations(docs: list[Document]) -> list[dict]:
+        citations = []
+        for doc in docs:
+            metadata = doc.metadata or {}
+            snippet = " ".join(doc.page_content.split())
+            citations.append(
+                {
+                    "document_id": metadata.get("document_id", "unknown_document"),
+                    "document_name": metadata.get("document_name", "Tài liệu không rõ tên"),
+                    "page": metadata.get("page"),
+                    "chunk_id": metadata.get("chunk_id"),
+                    "chunk_index": metadata.get("chunk_index"),
+                    "file_type": metadata.get("file_type"),
+                    "uploaded_at": metadata.get("uploaded_at"),
+                    "snippet": snippet[:320],
+                }
+            )
+        return citations
+
     # ------------------------------------------------------------------ #
     #  Query (Hybrid Pipeline)
     # ------------------------------------------------------------------ #
@@ -284,11 +390,12 @@ class RAGEngine:
 
         print(f"[Hybrid] Reranker selected {len(reranked_results)} docs")
 
+        citations = self._build_citations(reranked_results)
         relevant_chunks = [doc.page_content for doc in reranked_results]
 
         # ---- Step 4: Generate answer ----
         if not self.client:
-            return "LLM chưa được cấu hình (thiếu API Key).", relevant_chunks
+            return "LLM chưa được cấu hình (thiếu API Key).", citations
         
         context = "\n---\n".join(relevant_chunks)
         prompt = f"""
@@ -307,7 +414,7 @@ Trả lời:
             model=self.gemini_model, 
             contents=prompt
         )
-        return response.text, relevant_chunks
+        return response.text, citations
 
 if __name__ == "__main__":
     # Simple CLI for testing

@@ -32,14 +32,14 @@ async def get_status():
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     try:
-        text = rag.extract_text(file)
+        documents = rag.extract_documents(file)
 
-        if not text or not text.strip():
+        if not documents:
             raise HTTPException(status_code=400, detail="Could not extract text.")
 
         def process():
             rag.clear_index()
-            rag.build_index(text)
+            rag.build_index(documents)
             rag.save_index()
 
         background_tasks.add_task(process)

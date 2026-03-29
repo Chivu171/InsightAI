@@ -11,6 +11,13 @@ body,
   overflow: hidden;
 }
 
+body {
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.16), transparent 28%),
+    radial-gradient(circle at right 20%, rgba(245, 158, 11, 0.14), transparent 22%),
+    linear-gradient(180deg, #fffdf8 0%, #f7f8fc 48%, #eef4ff 100%);
+}
+
 /* Custom Markdown Styling */
 .prose ul {
   list-style-type: disc;
@@ -32,10 +39,12 @@ body,
   font-weight: 600;
   margin-top: 1rem;
   margin-bottom: 0.5rem;
+  color: #0f172a;
 }
 
 .prose p {
   margin-bottom: 0.75rem;
+  line-height: 1.8;
 }
 
 .prose strong {
@@ -43,8 +52,15 @@ body,
 }
 
 .prose code {
-  background-color: #f3f4f6;
+  background-color: #eaf2ff;
   padding: 0.125rem 0.25rem;
   border-radius: 0.25rem;
   font-family: monospace;
+}
+
+.prose blockquote {
+  margin: 1rem 0;
+  border-left: 3px solid #7dd3fc;
+  padding-left: 1rem;
+  color: #475467;
 }
