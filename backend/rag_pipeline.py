@@ -416,16 +416,3 @@ Trả lời:
         )
         return response.text, citations
 
-if __name__ == "__main__":
-    # Simple CLI for testing
-    rag = RAGEngine()
-    if rag.load_index():
-        print("Loaded existing index.")
-    else:
-        print("No index found. Please use the Streamlit app to index data.")
-    
-    while True:
-        q = input("\nHỏi (hoặc 'exit'): ")
-        if q.lower() == 'exit': break
-        ans, sources = rag.query(q)
-        print(f"\nAI: {ans}")
