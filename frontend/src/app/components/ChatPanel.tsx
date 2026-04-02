@@ -21,6 +21,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Document } from "./DocumentSidebar";
+import type { ChunkingMode, ModeBuildState } from "../App";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -59,12 +60,18 @@ export interface Message {
 interface ChatPanelProps {
   documentCount?: number;
   documents?: Document[];
+  selectedMode: ChunkingMode;
+  modeBuildState: Record<ChunkingMode, ModeBuildState>;
+  onModeChange: (mode: ChunkingMode) => void;
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
 }
 
 export function ChatPanel({
   documentCount = 0,
+  selectedMode,
+  modeBuildState,
+  onModeChange,
   sidebarCollapsed,
   onToggleSidebar,
 }: ChatPanelProps) {
@@ -73,10 +80,12 @@ export function ChatPanel({
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const currentModeState = modeBuildState[selectedMode];
+  const modeReady = currentModeState.status === "ready";
 
   const handleSend = async (customInput?: string) => {
     const messageText = customInput || input.trim();
-    if (!messageText || isLoading) return;
+    if (!messageText || isLoading || !modeReady) return;
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -90,7 +99,12 @@ export function ChatPanel({
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/query", {
+      const queryEndpoint =
+        selectedMode === "hybrid"
+          ? "http://localhost:8000/queryHybrid"
+          : "http://localhost:8000/querySimpleChunking";
+
+      const response = await fetch(queryEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -174,6 +188,11 @@ export function ChatPanel({
     }
   }, [messages]);
 
+  useEffect(() => {
+    setMessages([]);
+    setInput("");
+  }, [selectedMode]);
+
   const suggestedPrompts =
     documentCount > 0
       ? [
@@ -208,20 +227,48 @@ export function ChatPanel({
               </p>
               <h2 className="mt-1 text-2xl font-semibold text-zinc-950">AI Assistant</h2>
               <p className="mt-1 text-sm text-zinc-500">
-                {documentCount > 0
-                  ? `Đang kết nối với ${documentCount} tài liệu để trả lời theo ngữ cảnh`
-                  : "Tải tài liệu lên để bắt đầu hỏi đáp, tóm tắt và truy xuất insight"}
+                {modeReady
+                  ? `Mode ${selectedMode === "hybrid" ? "Hybrid" : "Fixed Chunking"} đã sẵn sàng để hỏi đáp`
+                  : `Bạn đang ở mode ${selectedMode === "hybrid" ? "Hybrid" : "Fixed Chunking"}. Cần build lại index trước khi hỏi.`}
               </p>
             </div>
           </div>
 
           <div className="hidden items-center gap-2 md:flex">
+            <div className="flex items-center rounded-full border border-zinc-200 bg-white/80 p-1 shadow-sm">
+              <button
+                onClick={() => onModeChange("hybrid")}
+                className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
+                  selectedMode === "hybrid"
+                    ? "bg-zinc-950 text-white"
+                    : "text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                Hybrid
+              </button>
+              <button
+                onClick={() => onModeChange("fixed")}
+                className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
+                  selectedMode === "fixed"
+                    ? "bg-zinc-950 text-white"
+                    : "text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                Fixed
+              </button>
+            </div>
             <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
               <LibraryBig className="mr-1 size-3.5" />
               {documentCount} tài liệu
             </Badge>
-            <Badge className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50">
-              Sẵn sàng phân tích
+            <Badge
+              className={`rounded-full px-3 py-1 ${
+                modeReady
+                  ? "border border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-50"
+                  : "border border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-50"
+              }`}
+            >
+              {modeReady ? "Sẵn sàng phân tích" : "Cần build lại index"}
             </Badge>
           </div>
         </div>
@@ -240,9 +287,9 @@ export function ChatPanel({
                     Hỏi đáp trên tài liệu theo cách rõ ràng và có trích dẫn.
                   </h3>
                   <p className="mt-3 max-w-xl text-sm leading-7 text-zinc-600 md:text-base">
-                    {documentCount > 0
-                      ? "Kho tài liệu đã sẵn sàng. Bạn có thể yêu cầu tóm tắt, đối chiếu điểm khác nhau, rút insight hoặc truy xuất câu trả lời chi tiết."
-                      : "Bắt đầu bằng cách tải tài liệu ở khung bên trái. Khi index xong, assistant sẽ trả lời dựa trên nội dung bạn cung cấp."}
+                    {modeReady
+                      ? "Mode hiện tại đã có index. Bạn có thể yêu cầu tóm tắt, đối chiếu điểm khác nhau, rút insight hoặc truy xuất câu trả lời chi tiết."
+                      : "Chọn mode bạn muốn dùng, sau đó upload tài liệu để build lại index cho đúng pipeline trước khi bắt đầu hỏi đáp."}
                   </p>
                 </div>
 
@@ -250,12 +297,14 @@ export function ChatPanel({
                   <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
                     <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Trạng thái</p>
                     <p className="mt-2 text-lg font-semibold text-zinc-950">
-                      {documentCount > 0 ? "Context đã sẵn sàng" : "Chờ tài liệu đầu vào"}
+                      {modeReady ? "Context đã sẵn sàng" : "Chờ build index"}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
-                    <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Khả năng</p>
-                    <p className="mt-2 text-lg font-semibold text-zinc-950">Tóm tắt, so sánh, trích dẫn</p>
+                    <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Pipeline</p>
+                    <p className="mt-2 text-lg font-semibold text-zinc-950">
+                      {selectedMode === "hybrid" ? "Hybrid Retrieval" : "Fixed Chunking"}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -265,10 +314,12 @@ export function ChatPanel({
                   <button
                     key={prompt}
                     onClick={() => {
+                      if (!modeReady) return;
                       setInput(prompt);
                       textareaRef.current?.focus();
                     }}
-                    className="group rounded-[24px] border border-white/80 bg-white/80 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-md"
+                    className="group rounded-[24px] border border-white/80 bg-white/80 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
+                    disabled={!modeReady}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-medium leading-6 text-zinc-800">{prompt}</p>
@@ -444,6 +495,28 @@ export function ChatPanel({
         <div className="mx-auto max-w-4xl">
           <div className="relative rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
             <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
+              <div className="flex items-center rounded-full border border-zinc-200 bg-zinc-50 p-1">
+                <button
+                  onClick={() => onModeChange("hybrid")}
+                  className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                    selectedMode === "hybrid"
+                      ? "bg-zinc-950 text-white"
+                      : "text-zinc-600 hover:bg-zinc-100"
+                  }`}
+                >
+                  Hybrid
+                </button>
+                <button
+                  onClick={() => onModeChange("fixed")}
+                  className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                    selectedMode === "fixed"
+                      ? "bg-zinc-950 text-white"
+                      : "text-zinc-600 hover:bg-zinc-100"
+                  }`}
+                >
+                  Fixed
+                </button>
+              </div>
               <Badge className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600 hover:bg-zinc-50">
                 Enter để gửi
               </Badge>
@@ -452,7 +525,12 @@ export function ChatPanel({
               </Badge>
               {documentCount > 0 && (
                 <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
-                  Đang dùng {documentCount} tài liệu làm ngữ cảnh
+                  Đang dùng {documentCount} tài liệu cho mode {selectedMode}
+                </Badge>
+              )}
+              {!modeReady && (
+                <Badge className="rounded-full border border-amber-100 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50">
+                  Hãy build lại index trước khi hỏi
                 </Badge>
               )}
             </div>
@@ -462,16 +540,20 @@ export function ChatPanel({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Đặt câu hỏi về tài liệu của bạn..."
+              placeholder={
+                modeReady
+                  ? "Đặt câu hỏi về tài liệu của bạn..."
+                  : `Mode ${selectedMode} chưa sẵn sàng. Hãy build index từ sidebar trước.`
+              }
               className="min-h-[120px] max-h-44 rounded-[22px] border-zinc-200/80 bg-zinc-50/70 px-4 py-3 pr-14 text-sm leading-7 shadow-inner"
-              disabled={isLoading}
+              disabled={isLoading || !modeReady}
             />
 
             <div className="absolute bottom-6 right-6">
               <Button
                 size="sm"
                 onClick={() => handleSend()}
-                disabled={!input.trim() || isLoading}
+                disabled={!input.trim() || isLoading || !modeReady}
                 className="size-10 rounded-2xl bg-zinc-950 p-0 hover:bg-zinc-800"
               >
                 <Send className="size-4" />

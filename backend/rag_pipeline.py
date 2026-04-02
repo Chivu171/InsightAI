@@ -46,6 +46,7 @@ class RAGEngine:
         self.retriever = None
         self.parent_splitter = SemanticChunker(self.embeddings)
         self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=20)
+        self.chunking_mode = None
         self.status = "idle"
         self.progress = 0
 
@@ -63,9 +64,12 @@ class RAGEngine:
         self.vectorstore = None
         self.docstore = InMemoryStore()
         self.retriever = None
+        self.chunking_mode = None
         self.bm25_index = None
         self.bm25_corpus = []
         self.all_chunks = []
+        self.status = "idle"
+        self.progress = 0
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
@@ -157,15 +161,10 @@ class RAGEngine:
             start = end - overlap
         return chunks
 
-    # ------------------------------------------------------------------ #
-    #  Indexing
-    # ------------------------------------------------------------------ #
-    def build_index(self, text_or_docs):
-        self.status = "processing"
-        self.progress = 10
-
+    @staticmethod
+    def _normalize_input_documents(text_or_docs):
         if isinstance(text_or_docs, str):
-            docs = [
+            return [
                 Document(
                     page_content=text_or_docs,
                     metadata={
@@ -178,8 +177,70 @@ class RAGEngine:
                     },
                 )
             ]
-        else:
-            docs = text_or_docs
+        return text_or_docs
+
+    @staticmethod
+    def _attach_chunk_metadata(chunks: list[Document]) -> list[Document]:
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            metadata = dict(chunk.metadata)
+            document_id = metadata.get("document_id", "uploaded_file")
+            page = metadata.get("page")
+            page_label = f"p{page}" if page is not None else "p0"
+            metadata["chunk_index"] = chunk_index
+            metadata["chunk_id"] = f"{document_id}_{page_label}_c{chunk_index}"
+            chunk.metadata = metadata
+        return chunks
+
+    def _prepare_fixed_chunks(self, docs: list[Document], chunk_size=500, overlap=100) -> list[Document]:
+        fixed_chunks: list[Document] = []
+
+        for doc in docs:
+            raw_chunks = self.chunk_text(doc.page_content, chunk_size=chunk_size, overlap=overlap)
+            for local_index, chunk_text in enumerate(raw_chunks, start=1):
+                cleaned_chunk = chunk_text.strip()
+                if not cleaned_chunk:
+                    continue
+
+                metadata = dict(doc.metadata)
+                metadata["fixed_chunk_local_index"] = local_index
+                fixed_chunks.append(Document(page_content=cleaned_chunk, metadata=metadata))
+
+        return self._attach_chunk_metadata(fixed_chunks)
+
+    def _generate_answer_from_docs(self, user_query: str, docs: list[Document]):
+        citations = self._build_citations(docs)
+        relevant_chunks = [doc.page_content for doc in docs]
+
+        if not self.client:
+            return "LLM chưa được cấu hình (thiếu API Key).", citations
+
+        context = "\n---\n".join(relevant_chunks)
+        prompt = f"""
+Bạn là một trợ lý AI thông minh. Hãy trả lời câu hỏi dựa trên ngữ cảnh được cung cấp dưới đây.
+Nếu thông tin không có trong ngữ cảnh, hãy nói rằng bạn không biết, đừng tự bịa ra câu trả lời.
+Hãy trình bày câu trả lời một cách rõ ràng, sử dụng markdown để định dạng (danh sách, in đậm, bảng, v.v.) để người dùng dễ đọc nhất.
+
+Câu hỏi: {user_query}
+
+Ngữ cảnh:
+{context}
+
+Trả lời:
+"""
+        response = self.client.models.generate_content(
+            model=self.gemini_model,
+            contents=prompt
+        )
+        return response.text, citations
+
+    # ------------------------------------------------------------------ #
+    #  Indexing
+    # ------------------------------------------------------------------ #
+    def build_index(self, text_or_docs):
+        self.status = "processing"
+        self.progress = 10
+
+        docs = self._normalize_input_documents(text_or_docs)
 
         if not docs:
             raise ValueError("No documents available for indexing.")
@@ -202,15 +263,7 @@ class RAGEngine:
         self.progress = 60
 
         parent_docs = self.parent_splitter.split_documents(docs)
-
-        for chunk_index, parent_doc in enumerate(parent_docs, start=1):
-            metadata = dict(parent_doc.metadata)
-            document_id = metadata.get("document_id", "uploaded_file")
-            page = metadata.get("page")
-            page_label = f"p{page}" if page is not None else "p0"
-            metadata["chunk_index"] = chunk_index
-            metadata["chunk_id"] = f"{document_id}_{page_label}_c{chunk_index}"
-            parent_doc.metadata = metadata
+        parent_docs = self._attach_chunk_metadata(parent_docs)
 
         self.progress = 70
 
@@ -221,11 +274,40 @@ class RAGEngine:
         tokenized = [self._tokenize(doc.page_content) for doc in self.all_chunks]
         self.bm25_corpus = tokenized
         self.bm25_index = BM25Okapi(tokenized)
+        self.chunking_mode = "semantic"
 
         self.progress = 100
         self.status = "done"
         print(f"[Hybrid] Built BM25 index with {len(self.all_chunks)} chunks")
         return self.vectorstore, parent_docs
+
+    def build_fixed_chunk_index(self, text_or_docs, chunk_size=800, overlap=250):
+        self.status = "processing"
+        self.progress = 10
+
+        docs = self._normalize_input_documents(text_or_docs)
+        if not docs:
+            raise ValueError("No documents available for fixed chunk indexing.")
+
+        self.progress = 35
+        fixed_chunks = self._prepare_fixed_chunks(docs, chunk_size=chunk_size, overlap=overlap)
+        if not fixed_chunks:
+            raise ValueError("No fixed chunks were created from the provided documents.")
+
+        self.progress = 60
+        self.vectorstore = FAISS.from_documents(fixed_chunks, self.embeddings)
+        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 12})
+
+        self.progress = 80
+        self.all_chunks = fixed_chunks
+        self.bm25_corpus = [self._tokenize(doc.page_content) for doc in fixed_chunks]
+        self.bm25_index = BM25Okapi(self.bm25_corpus)
+        self.chunking_mode = "fixed"
+
+        self.progress = 100
+        self.status = "done"
+        print(f"[FixedChunking] Built index with {len(self.all_chunks)} fixed chunks")
+        return self.vectorstore, fixed_chunks
 
     # ------------------------------------------------------------------ #
     #  Persistence
@@ -270,6 +352,7 @@ class RAGEngine:
                 self.bm25_index = BM25Okapi(self.bm25_corpus)
                 print(f"[Hybrid] Loaded BM25 index with {len(self.all_chunks)} chunks")
 
+            self.chunking_mode = "semantic"
             return True
         return False
 
@@ -390,29 +473,30 @@ class RAGEngine:
 
         print(f"[Hybrid] Reranker selected {len(reranked_results)} docs")
 
-        citations = self._build_citations(reranked_results)
-        relevant_chunks = [doc.page_content for doc in reranked_results]
+        return self._generate_answer_from_docs(user_query, reranked_results)
 
-        # ---- Step 4: Generate answer ----
-        if not self.client:
-            return "LLM chưa được cấu hình (thiếu API Key).", citations
-        
-        context = "\n---\n".join(relevant_chunks)
-        prompt = f"""
-Bạn là một trợ lý AI thông minh. Hãy trả lời câu hỏi dựa trên ngữ cảnh được cung cấp dưới đây.
-Nếu thông tin không có trong ngữ cảnh, hãy nói rằng bạn không biết, đừng tự bịa ra câu trả lời.
-Hãy trình bày câu trả lời một cách rõ ràng, sử dụng markdown để định dạng (danh sách, in đậm, bảng, v.v.) để người dùng dễ đọc nhất.
+    def query_fixed_chunking(self, user_query, k=3):
+        if self.retriever is None or self.chunking_mode != "fixed":
+            return (
+                "Chưa có fixed chunk index. Hãy chạy build_fixed_chunk_index(...) trước khi query.",
+                [],
+            )
 
-Câu hỏi: {user_query}
+        bm25_results = self._bm25_retrieve(user_query, k=k * 5)
+        dense_results = self._dense_retrieve(user_query, k=k * 5)
 
-Ngữ cảnh:
-{context}
-
-Trả lời:
-"""
-        response = self.client.models.generate_content(
-            model=self.gemini_model, 
-            contents=prompt
+        print(
+            f"[FixedChunking] BM25 returned {len(bm25_results)} docs, Dense returned {len(dense_results)} docs"
         )
-        return response.text, citations
 
+        fused_results = self._rrf_fusion(
+            [bm25_results, dense_results],
+            k=k * 3,
+        )
+
+        print(f"[FixedChunking] RRF Fusion produced {len(fused_results)} candidates")
+
+        reranked_results = self._rerank(user_query, fused_results, top_k=k)
+
+        print(f"[FixedChunking] Reranker selected {len(reranked_results)} docs")
+        return self._generate_answer_from_docs(user_query, reranked_results)
