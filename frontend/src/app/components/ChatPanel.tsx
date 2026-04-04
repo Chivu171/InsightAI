@@ -33,9 +33,6 @@ export interface Citation {
   page?: number;
   chunkId?: string;
   chunkIndex?: number;
-  parentId?: string;
-  childIdx?: number;
-  childCount?: number;
   fileType?: string;
   uploadedAt?: string;
   snippet: string;
@@ -47,9 +44,6 @@ interface CitationApiResponse {
   page?: number;
   chunk_id?: string;
   chunk_index?: number;
-  parent_id?: string;
-  child_idx?: number;
-  child_count?: number;
   file_type?: string;
   uploaded_at?: string;
   snippet: string;
@@ -134,9 +128,6 @@ export function ChatPanel({
           page: source.page,
           chunkId: source.chunk_id,
           chunkIndex: source.chunk_index,
-          parentId: source.parent_id,
-          childIdx: source.child_idx,
-          childCount: source.child_count,
           fileType: source.file_type,
           uploadedAt: source.uploaded_at,
           snippet: source.snippet,
@@ -408,12 +399,6 @@ export function ChatPanel({
                                     {citation.chunkIndex && (
                                       <span className="text-[11px] text-sky-700/80">
                                         Chunk {citation.chunkIndex}
-                                      </span>
-                                    )}
-                                    {citation.childIdx && (
-                                      <span className="text-[11px] text-sky-700/80">
-                                        Child {citation.childIdx}
-                                        {citation.childCount ? `/${citation.childCount}` : ""}
                                       </span>
                                     )}
                                   </div>

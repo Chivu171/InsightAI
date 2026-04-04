@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 
+from langchain.retrievers import ParentDocumentRetriever
 from langchain.storage import InMemoryStore
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -41,9 +42,7 @@ class RAGEngine:
         # --- Hybrid retrieval components ---
         self.bm25_index = None          # BM25Okapi instance
         self.bm25_corpus = []           # Tokenized corpus for BM25
-        self.all_chunks = []            # list[Document] – active retrieval chunks
-        self.parent_chunks = []         # list[Document] – semantic parent chunks for full-parent baseline
-        self.child_chunks_by_parent = {}  # dict[str, list[Document]]
+        self.all_chunks = []            # list[Document] – all parent chunks (shared by both retrievers)
         self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
     # ------------------------------------------------------------------ #
@@ -58,8 +57,6 @@ class RAGEngine:
         self.bm25_index = None
         self.bm25_corpus = []
         self.all_chunks = []
-        self.parent_chunks = []
-        self.child_chunks_by_parent = {}
         self.status = "idle"
         self.progress = 0
 
@@ -191,51 +188,14 @@ class RAGEngine:
             page_label = f"p{page}" if page is not None else "p0"
             metadata["chunk_index"] = chunk_index
             metadata["chunk_id"] = f"{document_id}_{page_label}_c{chunk_index}"
-            metadata["parent_id"] = metadata["chunk_id"]
             chunk.metadata = metadata
         return chunks
-
-    def _prepare_child_chunks(self, parent_docs: list[Document]) -> list[Document]:
-        child_chunks: list[Document] = []
-
-        for parent_doc in parent_docs:
-            parent_metadata = dict(parent_doc.metadata)
-            parent_id = parent_metadata.get("chunk_id")
-            raw_children = self.child_splitter.split_text(parent_doc.page_content)
-            cleaned_children = [child.strip() for child in raw_children if child and child.strip()]
-
-            for child_idx, child_text in enumerate(cleaned_children, start=1):
-                metadata = dict(parent_metadata)
-                metadata["parent_id"] = parent_id
-                metadata["child_idx"] = child_idx
-                metadata["child_count"] = len(cleaned_children)
-                metadata["chunk_id"] = f"{parent_id}_child_{child_idx}"
-                metadata["chunk_index"] = child_idx
-                child_chunks.append(Document(page_content=child_text, metadata=metadata))
-
-        return child_chunks
-
-    @staticmethod
-    def _group_child_chunks(child_docs: list[Document]) -> dict[str, list[Document]]:
-        grouped: dict[str, list[Document]] = {}
-
-        for doc in child_docs:
-            parent_id = (doc.metadata or {}).get("parent_id")
-            if not parent_id:
-                continue
-            grouped.setdefault(parent_id, []).append(doc)
-
-        for siblings in grouped.values():
-            siblings.sort(key=lambda doc: (doc.metadata or {}).get("child_idx", 0))
-
-        return grouped
 
     def _prepare_fixed_chunks(self, docs: list[Document], chunk_size=500, overlap=100) -> list[Document]:
         fixed_chunks: list[Document] = []
 
         for doc in docs:
             raw_chunks = self.chunk_text(doc.page_content, chunk_size=chunk_size, overlap=overlap)
-            total_chunks = len([chunk for chunk in raw_chunks if chunk and chunk.strip()])
             for local_index, chunk_text in enumerate(raw_chunks, start=1):
                 cleaned_chunk = chunk_text.strip()
                 if not cleaned_chunk:
@@ -243,8 +203,6 @@ class RAGEngine:
 
                 metadata = dict(doc.metadata)
                 metadata["fixed_chunk_local_index"] = local_index
-                metadata["child_idx"] = local_index
-                metadata["child_count"] = total_chunks
                 fixed_chunks.append(Document(page_content=cleaned_chunk, metadata=metadata))
 
         return self._attach_chunk_metadata(fixed_chunks)
@@ -275,22 +233,6 @@ Trả lời:
         )
         return response.text, citations
 
-    def _build_local_child_window(self, doc: Document, window_size: int = 1) -> list[Document]:
-        metadata = doc.metadata or {}
-        parent_id = metadata.get("parent_id")
-        child_idx = metadata.get("child_idx")
-
-        if not parent_id or child_idx is None:
-            return [doc]
-
-        siblings = self.child_chunks_by_parent.get(parent_id, [])
-        if not siblings:
-            return [doc]
-
-        start = max(0, child_idx - 1 - window_size)
-        end = min(len(siblings), child_idx + window_size)
-        return siblings[start:end]
-
     # ------------------------------------------------------------------ #
     #  Indexing
     # ------------------------------------------------------------------ #
@@ -305,26 +247,30 @@ Trả lời:
 
         self.progress = 30
 
+        if self.vectorstore is None:
+            dummy_text = "initialization"
+            self.vectorstore = FAISS.from_texts([dummy_text], self.embeddings)
+
         self.progress = 50
+
+        self.retriever = ParentDocumentRetriever(
+            vectorstore=self.vectorstore,
+            docstore=self.docstore,
+            child_splitter=self.child_splitter,
+            parent_splitter=None,
+        )
 
         self.progress = 60
 
         parent_docs = self.parent_splitter.split_documents(docs)
         parent_docs = self._attach_chunk_metadata(parent_docs)
-        child_docs = self._prepare_child_chunks(parent_docs)
-
-        if not child_docs:
-            raise ValueError("No child chunks were created from the semantic parent chunks.")
 
         self.progress = 70
 
-        self.vectorstore = FAISS.from_documents(child_docs, self.embeddings)
-        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 12})
+        self.retriever.add_documents(parent_docs)
 
-        # --- Build BM25 index from the same child chunks ---
-        self.parent_chunks = parent_docs
-        self.all_chunks = child_docs
-        self.child_chunks_by_parent = self._group_child_chunks(child_docs)
+        # --- Build BM25 index from the same parent chunks ---
+        self.all_chunks.extend(parent_docs)
         tokenized = [self._tokenize(doc.page_content) for doc in self.all_chunks]
         self.bm25_corpus = tokenized
         self.bm25_index = BM25Okapi(tokenized)
@@ -332,8 +278,8 @@ Trả lời:
 
         self.progress = 100
         self.status = "done"
-        print(f"[Hybrid] Built BM25 index with {len(self.all_chunks)} child chunks")
-        return self.vectorstore, child_docs
+        print(f"[Hybrid] Built BM25 index with {len(self.all_chunks)} chunks")
+        return self.vectorstore, parent_docs
 
     def build_fixed_chunk_index(self, text_or_docs, chunk_size=800, overlap=250):
         self.status = "processing"
@@ -353,9 +299,7 @@ Trả lời:
         self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 12})
 
         self.progress = 80
-        self.parent_chunks = fixed_chunks
         self.all_chunks = fixed_chunks
-        self.child_chunks_by_parent = self._group_child_chunks(fixed_chunks)
         self.bm25_corpus = [self._tokenize(doc.page_content) for doc in fixed_chunks]
         self.bm25_index = BM25Okapi(self.bm25_corpus)
         self.chunking_mode = "fixed"
@@ -379,8 +323,6 @@ Trả lời:
         with open(os.path.join(folder_path, "bm25_data.pkl"), "wb") as f:
             pickle.dump({
                 "all_chunks": self.all_chunks,
-                "parent_chunks": self.parent_chunks,
-                "child_chunks_by_parent": self.child_chunks_by_parent,
                 "bm25_corpus": self.bm25_corpus,
             }, f)
         return True
@@ -393,7 +335,12 @@ Trả lời:
                 with open(docstore_path, "rb") as f:
                     self.docstore = pickle.load(f)
             
-            self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 12})
+            self.retriever = ParentDocumentRetriever(
+                vectorstore=self.vectorstore,
+                docstore=self.docstore,
+                child_splitter=self.child_splitter,
+                parent_splitter=None,
+            )
 
             # Load BM25 data
             bm25_path = os.path.join(folder_path, "bm25_data.pkl")
@@ -401,8 +348,6 @@ Trả lời:
                 with open(bm25_path, "rb") as f:
                     data = pickle.load(f)
                 self.all_chunks = data["all_chunks"]
-                self.parent_chunks = data.get("parent_chunks", [])
-                self.child_chunks_by_parent = data.get("child_chunks_by_parent") or self._group_child_chunks(self.all_chunks)
                 self.bm25_corpus = data["bm25_corpus"]
                 self.bm25_index = BM25Okapi(self.bm25_corpus)
                 print(f"[Hybrid] Loaded BM25 index with {len(self.all_chunks)} chunks")
@@ -469,10 +414,6 @@ Trả lời:
 
     def _rerank(self, query: str, docs: list[Document], top_k: int = 5) -> list[Document]:
         """Re-rank documents using a cross-encoder model."""
-        return [doc for _, doc in self._rerank_with_scores(query, docs, top_k=top_k)]
-
-    def _rerank_with_scores(self, query: str, docs: list[Document], top_k: int = 5) -> list[tuple[float, Document]]:
-        """Re-rank documents using a cross-encoder model and keep the scores."""
         if not docs:
             return []
 
@@ -482,73 +423,7 @@ Trả lời:
         scored_docs = list(zip(scores, docs))
         scored_docs.sort(key=lambda x: x[0], reverse=True)
 
-        return [(float(score), doc) for score, doc in scored_docs[:top_k]]
-
-    @staticmethod
-    def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
-        a = np.array(vector_a, dtype=np.float32)
-        b = np.array(vector_b, dtype=np.float32)
-        denominator = np.linalg.norm(a) * np.linalg.norm(b)
-        if denominator == 0:
-            return 0.0
-        return float(np.dot(a, b) / denominator)
-
-    def _selective_context_expansion(
-        self,
-        user_query: str,
-        anchor_docs: list[Document],
-        anchor_scores: list[float],
-        alpha: float = 0.7,
-        beta: float = 0.3,
-        max_chunks: int = 4,
-    ) -> list[Document]:
-        if not anchor_docs:
-            return []
-
-        parent_groups: dict[str, list[tuple[float, Document]]] = {}
-        for score, doc in zip(anchor_scores, anchor_docs):
-            parent_id = (doc.metadata or {}).get("parent_id")
-            if not parent_id:
-                continue
-            parent_groups.setdefault(parent_id, []).append((score, doc))
-
-        if not parent_groups:
-            return anchor_docs
-
-        strongest_parent_id = max(
-            parent_groups,
-            key=lambda parent_id: (
-                sum(score for score, _ in parent_groups[parent_id]),
-                len(parent_groups[parent_id]),
-            ),
-        )
-
-        parent_anchor_pairs = parent_groups[strongest_parent_id]
-        parent_anchors = [doc for _, doc in parent_anchor_pairs]
-        siblings = self.child_chunks_by_parent.get(strongest_parent_id, [])
-        if not siblings:
-            return parent_anchors
-
-        query_vector = self.embeddings.embed_query(user_query)
-        sibling_vectors = self.embeddings.embed_documents([doc.page_content for doc in siblings])
-        anchor_vectors = self.embeddings.embed_documents([doc.page_content for doc in parent_anchors])
-
-        scored_siblings: list[tuple[float, Document]] = []
-        for sibling, sibling_vector in zip(siblings, sibling_vectors):
-            query_similarity = self._cosine_similarity(query_vector, sibling_vector)
-            anchor_similarity = 0.0
-            if anchor_vectors:
-                anchor_similarity = max(
-                    self._cosine_similarity(anchor_vector, sibling_vector)
-                    for anchor_vector in anchor_vectors
-                )
-
-            combined_score = alpha * query_similarity + beta * anchor_similarity
-            scored_siblings.append((combined_score, sibling))
-
-        selected_docs = [doc for _, doc in sorted(scored_siblings, key=lambda item: item[0], reverse=True)[:max_chunks]]
-        selected_docs.sort(key=lambda doc: (doc.metadata or {}).get("child_idx", 0))
-        return selected_docs
+        return [doc for _, doc in scored_docs[:top_k]]
 
     @staticmethod
     def _build_citations(docs: list[Document]) -> list[dict]:
@@ -563,49 +438,12 @@ Trả lời:
                     "page": metadata.get("page"),
                     "chunk_id": metadata.get("chunk_id"),
                     "chunk_index": metadata.get("chunk_index"),
-                    "parent_id": metadata.get("parent_id"),
-                    "child_idx": metadata.get("child_idx"),
-                    "child_count": metadata.get("child_count"),
                     "file_type": metadata.get("file_type"),
                     "uploaded_at": metadata.get("uploaded_at"),
                     "snippet": snippet[:320],
                 }
             )
         return citations
-
-    def query_full_parent(self, user_query, k=3):
-        if self.retriever is None:
-            if not self.load_index():
-                return "Chưa có dữ liệu. Vui lòng tải file và index trước.", []
-
-        if self.chunking_mode != "semantic":
-            return self.query_fixed_chunking(user_query, k=k)
-
-        bm25_results = self._bm25_retrieve(user_query, k=k * 5)
-        dense_results = self._dense_retrieve(user_query, k=k * 5)
-
-        fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
-        reranked_results = self._rerank(user_query, fused_results, top_k=k)
-
-        parent_docs: list[Document] = []
-        seen_parent_ids: set[str] = set()
-        for doc in reranked_results:
-            parent_id = (doc.metadata or {}).get("parent_id")
-            if not parent_id or parent_id in seen_parent_ids:
-                continue
-            siblings = self.child_chunks_by_parent.get(parent_id, [])
-            if siblings:
-                full_parent_text = "\n".join(sibling.page_content for sibling in siblings)
-                metadata = dict(doc.metadata or {})
-                metadata["chunk_id"] = parent_id
-                metadata["chunk_index"] = metadata.get("chunk_index")
-                parent_docs.append(Document(page_content=full_parent_text, metadata=metadata))
-                seen_parent_ids.add(parent_id)
-
-        if not parent_docs:
-            parent_docs = reranked_results
-
-        return self._generate_answer_from_docs(user_query, parent_docs[:k])
 
     # ------------------------------------------------------------------ #
     #  Query (Hybrid Pipeline)
@@ -627,27 +465,13 @@ Trả lời:
             k=k * 3,   # keep more candidates for reranking
         )
 
-
         # ---- Step 3: Rerank ----
-        reranked_results = self._rerank_with_scores(user_query, fused_results, top_k=k)
-
+        reranked_results = self._rerank(user_query, fused_results, top_k=k)
 
         if not reranked_results:
             return self._generate_answer_from_docs(user_query, [])
 
-        anchor_scores = [score for score, _ in reranked_results]
-        anchor_docs = [doc for _, doc in reranked_results]
-        selected_context = self._selective_context_expansion(
-            user_query,
-            anchor_docs=anchor_docs,
-            anchor_scores=anchor_scores,
-            alpha=0.7,
-            beta=0.3,
-            max_chunks=max(k + 1, 4),
-        )
-        print(f"[Hybrid] Using selective context expansion with {len(selected_context)} chunks")
-
-        return self._generate_answer_from_docs(user_query, selected_context)
+        return self._generate_answer_from_docs(user_query, reranked_results)
 
     def query_fixed_chunking(self, user_query, k=3):
         if self.retriever is None or self.chunking_mode != "fixed":
