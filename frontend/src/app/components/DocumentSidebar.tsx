@@ -20,6 +20,7 @@ import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { Badge } from "./ui/badge";
 import type { ChunkingMode, ModeBuildState } from "../App";
+import { API_BASE_URL } from "../api";
 
 export interface Document {
   id: string;
@@ -70,7 +71,7 @@ export function DocumentSidebar({
     if (indexing) {
       pollingRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`http://localhost:8000/progress/${selectedMode}`);
+          const res = await fetch(`${API_BASE_URL}/progress/${selectedMode}`);
           const data = await res.json();
           const normalizedStatus =
             data.status === "done" ? "ready" : data.status === "processing" ? "processing" : "idle";
@@ -148,8 +149,8 @@ export function DocumentSidebar({
 
     const uploadEndpoint =
       selectedMode === "hybrid"
-        ? "http://localhost:8000/uploadHybrid"
-        : "http://localhost:8000/uploadSimpleChunking";
+        ? `${API_BASE_URL}/uploadHybrid`
+        : `${API_BASE_URL}/uploadSimpleChunking`;
 
     try {
       for (const file of selectedFiles) {

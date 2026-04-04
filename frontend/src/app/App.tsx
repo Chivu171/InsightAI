@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { DocumentSidebar, Document } from "./components/DocumentSidebar";
 import { ChatPanel } from "./components/ChatPanel";
 import { useIsMobile } from "./components/ui/use-mobile";
+import { API_BASE_URL } from "./api";
 
 export type ChunkingMode = "hybrid" | "fixed";
 
@@ -30,8 +31,8 @@ export default function App() {
     if (nextMode === selectedMode) return;
 
     void Promise.all([
-      fetch("http://localhost:8000/reset/hybrid", { method: "POST" }),
-      fetch("http://localhost:8000/reset/fixed", { method: "POST" }),
+      fetch(`${API_BASE_URL}/reset/hybrid`, { method: "POST" }),
+      fetch(`${API_BASE_URL}/reset/fixed`, { method: "POST" }),
     ]).catch((error) => {
       console.error("Failed to reset indexes on mode change:", error);
     });

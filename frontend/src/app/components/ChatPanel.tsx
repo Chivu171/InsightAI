@@ -22,6 +22,7 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Document } from "./DocumentSidebar";
 import type { ChunkingMode, ModeBuildState } from "../App";
+import { API_BASE_URL } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -101,8 +102,8 @@ export function ChatPanel({
     try {
       const queryEndpoint =
         selectedMode === "hybrid"
-          ? "http://localhost:8000/queryHybrid"
-          : "http://localhost:8000/querySimpleChunking";
+          ? `${API_BASE_URL}/queryHybrid`
+          : `${API_BASE_URL}/querySimpleChunking`;
 
       const response = await fetch(queryEndpoint, {
         method: "POST",

@@ -2,34 +2,41 @@ import os
 import pickle
 import re
 from datetime import datetime, timezone
+
 import fitz
 import numpy as np
-from google import genai
+import requests
 from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 
-from langchain.retrievers import ParentDocumentRetriever
-from langchain.storage import InMemoryStore
+from langchain_classic.retrievers import ParentDocumentRetriever
+from langchain_core.stores import InMemoryStore
 from langchain_community.vectorstores import FAISS
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 class RAGEngine:
-    def __init__(self, model_name="all-MiniLM-L6-v2", gemini_model="models/gemini-flash-latest"):
+    def __init__(
+        self,
+        model_name: str = "BAAI/bge-small-en-v1.5",
+        ollama_model: str = "qwen2.5:7b",
+        ollama_base_url: str = "http://127.0.0.1:11434",
+    ):
         load_dotenv()
+
         self.api_key = os.getenv("GOOGLE_API_KEY")
-        if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
-            self.gemini_model = gemini_model
-        else:
-            self.client = None
-            self.gemini_model = None
-        
-        self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        self.client = None
+        self.gemini_model = None
+
+        self.embedding_model_name = os.getenv("EMBEDDING_MODEL", model_name)
+        self.ollama_model = os.getenv("OLLAMA_MODEL", ollama_model)
+        self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", ollama_base_url).rstrip("/")
+
+        self.embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model_name)
         self.vectorstore = None
         self.docstore = InMemoryStore()
         self.retriever = None
@@ -39,17 +46,12 @@ class RAGEngine:
         self.status = "idle"
         self.progress = 0
 
-        # --- Hybrid retrieval components ---
-        self.bm25_index = None          # BM25Okapi instance
-        self.bm25_corpus = []           # Tokenized corpus for BM25
-        self.all_chunks = []            # list[Document] – all parent chunks (shared by both retrievers)
+        self.bm25_index = None
+        self.bm25_corpus = []
+        self.all_chunks = []
         self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-    # ------------------------------------------------------------------ #
-    #  Helpers
-    # ------------------------------------------------------------------ #
     def clear_index(self):
-        """Reset the vectorstore, docstore, and BM25 index to empty states."""
         self.vectorstore = None
         self.docstore = InMemoryStore()
         self.retriever = None
@@ -62,14 +64,10 @@ class RAGEngine:
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
-        """Simple whitespace + punctuation tokenizer with lowercasing."""
         return re.findall(r"\w+", text.lower())
 
     def extract_text(self, file_obj):
-        """Extract text from FastAPI UploadFile or plain file object."""
         filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", "")
-
-        # FastAPI UploadFile
         real_file = getattr(file_obj, "file", file_obj)
 
         if str(filename).lower().endswith(".pdf"):
@@ -86,12 +84,11 @@ class RAGEngine:
                     if page_text:
                         pages.append(page_text)
                 return "\n".join(pages)
-        else:
-            content = real_file.read()
-            return content.decode("utf-8") if isinstance(content, bytes) else content
+
+        content = real_file.read()
+        return content.decode("utf-8") if isinstance(content, bytes) else content
 
     def extract_documents(self, file_obj) -> list[Document]:
-        """Extract one or more LangChain documents with metadata preserved."""
         filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", "uploaded_file")
         real_file = getattr(file_obj, "file", file_obj)
         document_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", os.path.splitext(filename)[0]).strip("_") or "uploaded_file"
@@ -134,7 +131,6 @@ class RAGEngine:
         content = real_file.read()
         text = content.decode("utf-8") if isinstance(content, bytes) else content
         text = (text or "").strip()
-
         if not text:
             return []
 
@@ -211,81 +207,54 @@ class RAGEngine:
         citations = self._build_citations(docs)
         relevant_chunks = [doc.page_content for doc in docs]
 
-        if not self.client:
-            return "LLM chưa được cấu hình (thiếu API Key).", citations
+        if not relevant_chunks:
+            return "Khong co trong tai lieu.", citations
 
         context = "\n---\n".join(relevant_chunks)
         prompt = f"""
-[Vai trò]
-Bạn là chuyên gia đọc hiểu và phân tích bài báo khoa học (AI/ML).
+Ban la tro ly QA cho paper khoa hoc.
+Chi duoc tra loi dua tren ngu canh truy xuat ben duoi.
+Neu khong du thong tin, phai tra loi chinh xac: \"Khong co trong tai lieu\".
 
-[Bối cảnh]
-Bạn đang trả lời câu hỏi dựa trên ngữ cảnh được truy xuất từ bài báo (RAG).
-Ngữ cảnh có thể không đầy đủ, vì vậy bạn chỉ được phép sử dụng thông tin có trong ngữ cảnh.
+Yeu cau:
+- Tra loi bang tieng Viet ro rang, ngan gon, khong suy dien qua ngu canh.
+- Neu phu hop, trinh bay theo 3 phan: Answer, Explanation, Related Knowledge.
+- Khong dua them kien thuc ben ngoai ngu canh.
 
-[Nhiệm vụ]
-Trả lời câu hỏi theo 3 phần:
+Cau hoi: {user_query}
 
-1. **Answer (Câu trả lời chính)**:
-   - Ngắn gọn, trực tiếp (1–2 câu)
-   - Nếu hỏi "method chính" → chỉ chọn 1 method quan trọng nhất
-
-2. **Explanation (Giải thích)**:
-   - Giải thích vì sao câu trả lời đúng
-   - Tổng hợp thông tin từ các đoạn liên quan trong ngữ cảnh
-   - Có thể nhắc đến các thành phần, công thức, hoặc cơ chế liên quan
-
-3. **Related Knowledge (Kiến thức liên quan)**:
-   - Chỉ bổ sung nếu trong ngữ cảnh có đề cập
-   - Ví dụ: phương pháp cải tiến, biến thể, hoặc kỹ thuật liên quan
-   - Không được thêm kiến thức bên ngoài
-
-[Ràng buộc]
-- CHỈ sử dụng thông tin từ ngữ cảnh
-- KHÔNG suy diễn ngoài
-- Nếu không có thông tin → trả lời: "Không có trong tài liệu"
-- Không lan man
-
-[Định dạng]
-**Answer:** ...
-**Explanation:** ...
-**Related Knowledge:** ... (có thể bỏ nếu không có)
-
----
-
-Câu hỏi: {user_query}
-
-Ngữ cảnh:
+Ngu canh:
 {context}
 
-Trả lời:
+Tra loi:
 """
-        response = self.client.models.generate_content(
-            model=self.gemini_model,
-            contents=prompt
+        response = requests.post(
+            f"{self.ollama_base_url}/api/generate",
+            json={
+                "model": self.ollama_model,
+                "prompt": prompt,
+                "stream": False,
+            },
+            timeout=180,
         )
-        return response.text, citations
+        response.raise_for_status()
+        payload = response.json()
+        answer = payload.get("response", "").strip()
+        return answer or "Khong co trong tai lieu.", citations
 
-    # ------------------------------------------------------------------ #
-    #  Indexing
-    # ------------------------------------------------------------------ #
     def build_index(self, text_or_docs):
         self.status = "processing"
         self.progress = 10
 
         docs = self._normalize_input_documents(text_or_docs)
-
         if not docs:
             raise ValueError("No documents available for indexing.")
 
         self.progress = 30
-
         if self.vectorstore is None:
-            dummy_text = "initialization"
-            self.vectorstore = FAISS.from_texts([dummy_text], self.embeddings)
+            self.vectorstore = FAISS.from_texts(["initialization"], self.embeddings)
 
         self.progress = 50
-
         self.retriever = ParentDocumentRetriever(
             vectorstore=self.vectorstore,
             docstore=self.docstore,
@@ -294,15 +263,12 @@ Trả lời:
         )
 
         self.progress = 60
-
         parent_docs = self.parent_splitter.split_documents(docs)
         parent_docs = self._attach_chunk_metadata(parent_docs)
 
         self.progress = 70
-
         self.retriever.add_documents(parent_docs)
 
-        # --- Build BM25 index from the same parent chunks ---
         self.all_chunks.extend(parent_docs)
         tokenized = [self._tokenize(doc.page_content) for doc in self.all_chunks]
         self.bm25_corpus = tokenized
@@ -342,74 +308,72 @@ Trả lời:
         print(f"[FixedChunking] Built index with {len(self.all_chunks)} fixed chunks")
         return self.vectorstore, fixed_chunks
 
-    # ------------------------------------------------------------------ #
-    #  Persistence
-    # ------------------------------------------------------------------ #
     def save_index(self, folder_path="vector_db"):
         if self.vectorstore is None:
             return False
+
         os.makedirs(folder_path, exist_ok=True)
         self.vectorstore.save_local(folder_path)
         with open(os.path.join(folder_path, "docstore.pkl"), "wb") as f:
             pickle.dump(self.docstore, f)
-        # Persist BM25 data
         with open(os.path.join(folder_path, "bm25_data.pkl"), "wb") as f:
-            pickle.dump({
-                "all_chunks": self.all_chunks,
-                "bm25_corpus": self.bm25_corpus,
-            }, f)
+            pickle.dump(
+                {
+                    "all_chunks": self.all_chunks,
+                    "bm25_corpus": self.bm25_corpus,
+                },
+                f,
+            )
         return True
 
     def load_index(self, folder_path="vector_db"):
-        if os.path.exists(os.path.join(folder_path, "index.faiss")):
-            self.vectorstore = FAISS.load_local(folder_path, self.embeddings, allow_dangerous_deserialization=True)
-            docstore_path = os.path.join(folder_path, "docstore.pkl")
-            if os.path.exists(docstore_path):
-                with open(docstore_path, "rb") as f:
-                    self.docstore = pickle.load(f)
-            
-            self.retriever = ParentDocumentRetriever(
-                vectorstore=self.vectorstore,
-                docstore=self.docstore,
-                child_splitter=self.child_splitter,
-                parent_splitter=None,
-            )
+        if not os.path.exists(os.path.join(folder_path, "index.faiss")):
+            return False
 
-            # Load BM25 data
-            bm25_path = os.path.join(folder_path, "bm25_data.pkl")
-            if os.path.exists(bm25_path):
-                with open(bm25_path, "rb") as f:
-                    data = pickle.load(f)
-                self.all_chunks = data["all_chunks"]
-                self.bm25_corpus = data["bm25_corpus"]
-                self.bm25_index = BM25Okapi(self.bm25_corpus)
-                print(f"[Hybrid] Loaded BM25 index with {len(self.all_chunks)} chunks")
+        self.vectorstore = FAISS.load_local(
+            folder_path,
+            self.embeddings,
+            allow_dangerous_deserialization=True,
+        )
+        docstore_path = os.path.join(folder_path, "docstore.pkl")
+        if os.path.exists(docstore_path):
+            with open(docstore_path, "rb") as f:
+                self.docstore = pickle.load(f)
 
-            self.chunking_mode = "semantic"
-            return True
-        return False
+        self.retriever = ParentDocumentRetriever(
+            vectorstore=self.vectorstore,
+            docstore=self.docstore,
+            child_splitter=self.child_splitter,
+            parent_splitter=None,
+        )
 
-    # ------------------------------------------------------------------ #
-    #  Hybrid Retrieval
-    # ------------------------------------------------------------------ #
+        bm25_path = os.path.join(folder_path, "bm25_data.pkl")
+        if os.path.exists(bm25_path):
+            with open(bm25_path, "rb") as f:
+                data = pickle.load(f)
+            self.all_chunks = data["all_chunks"]
+            self.bm25_corpus = data["bm25_corpus"]
+            self.bm25_index = BM25Okapi(self.bm25_corpus)
+            print(f"[Hybrid] Loaded BM25 index with {len(self.all_chunks)} chunks")
+
+        self.chunking_mode = "semantic"
+        return True
+
     def _bm25_retrieve(self, query: str, k: int = 10) -> list[Document]:
-        """Retrieve documents using BM25 keyword matching."""
         if self.bm25_index is None or len(self.all_chunks) == 0:
             return []
 
         query_tokens = self._tokenize(query)
         scores = self.bm25_index.get_scores(query_tokens)
-
-        # Get top-k indices sorted by score descending
         top_indices = np.argsort(scores)[::-1][:k]
+
         results = []
         for idx in top_indices:
-            if scores[idx] > 0:  # Only include docs with non-zero BM25 score
+            if scores[idx] > 0:
                 results.append(self.all_chunks[idx])
         return results
 
     def _dense_retrieve(self, query: str, k: int = 10) -> list[Document]:
-        """Retrieve documents using dense embedding (FAISS) via ParentDocumentRetriever."""
         if self.retriever is None:
             return []
         try:
@@ -425,37 +389,26 @@ Trả lời:
         k: int = 10,
         rrf_k: int = 60,
     ) -> list[Document]:
-        """
-        Reciprocal Rank Fusion (RRF).
-
-        For each document, the fused score is:
-            score(d) = Σ  1 / (rank_i + rrf_k)
-        where rank_i is the 1-based rank in result list i.
-        """
         doc_scores: dict[str, float] = {}
         doc_map: dict[str, Document] = {}
 
         for result_list in result_lists:
             for rank, doc in enumerate(result_list, start=1):
-                doc_id = doc.page_content  # use content as key (unique enough for chunks)
+                doc_id = doc.page_content
                 doc_map[doc_id] = doc
                 doc_scores[doc_id] = doc_scores.get(doc_id, 0.0) + 1.0 / (rank + rrf_k)
 
-        # Sort by fused score descending
         sorted_ids = sorted(doc_scores, key=doc_scores.get, reverse=True)
         return [doc_map[did] for did in sorted_ids[:k]]
 
     def _rerank(self, query: str, docs: list[Document], top_k: int = 5) -> list[Document]:
-        """Re-rank documents using a cross-encoder model."""
         if not docs:
             return []
 
         pairs = [(query, doc.page_content) for doc in docs]
         scores = self.reranker.predict(pairs)
-
         scored_docs = list(zip(scores, docs))
         scored_docs.sort(key=lambda x: x[0], reverse=True)
-
         return [doc for _, doc in scored_docs[:top_k]]
 
     @staticmethod
@@ -467,7 +420,7 @@ Trả lời:
             citations.append(
                 {
                     "document_id": metadata.get("document_id", "unknown_document"),
-                    "document_name": metadata.get("document_name", "Tài liệu không rõ tên"),
+                    "document_name": metadata.get("document_name", "Tai lieu khong ro ten"),
                     "page": metadata.get("page"),
                     "chunk_id": metadata.get("chunk_id"),
                     "chunk_index": metadata.get("chunk_index"),
@@ -478,27 +431,13 @@ Trả lời:
             )
         return citations
 
-    # ------------------------------------------------------------------ #
-    #  Query (Hybrid Pipeline)
-    # ------------------------------------------------------------------ #
     def query(self, user_query, k=3):
-        if self.retriever is None:
-            # Try loading if exists
-            if not self.load_index():
-                return "Chưa có dữ liệu. Vui lòng tải file và index trước.", []
+        if self.retriever is None and not self.load_index():
+            return "Chua co du lieu. Vui long tai file va index truoc.", []
 
-        # ---- Step 1: Parallel retrieval ----
         bm25_results = self._bm25_retrieve(user_query, k=k * 5)
         dense_results = self._dense_retrieve(user_query, k=k * 5)
-
-
-        # ---- Step 2: RRF Fusion ----
-        fused_results = self._rrf_fusion(
-            [bm25_results, dense_results],
-            k=k * 3,   # keep more candidates for reranking
-        )
-
-        # ---- Step 3: Rerank ----
+        fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
         reranked_results = self._rerank(user_query, fused_results, top_k=k)
 
         if not reranked_results:
@@ -509,16 +448,12 @@ Trả lời:
     def query_fixed_chunking(self, user_query, k=3):
         if self.retriever is None or self.chunking_mode != "fixed":
             return (
-                "Chưa có fixed chunk index. Hãy chạy build_fixed_chunk_index(...) trước khi query.",
+                "Chua co fixed chunk index. Hay chay build_fixed_chunk_index(...) truoc khi query.",
                 [],
             )
 
         bm25_results = self._bm25_retrieve(user_query, k=k * 5)
         dense_results = self._dense_retrieve(user_query, k=k * 5)
-        fused_results = self._rrf_fusion(
-            [bm25_results, dense_results],
-            k=k * 3,
-        )
+        fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
         reranked_results = self._rerank(user_query, fused_results, top_k=k)
-
         return self._generate_answer_from_docs(user_query, reranked_results)
