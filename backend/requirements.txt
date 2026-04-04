@@ -5,7 +5,7 @@ faiss-cpu
 google-genai
 python-dotenv
 streamlit
-pypdf
+PyMuPDF
 fastapi
 uvicorn
 python-multipart
