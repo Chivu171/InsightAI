@@ -204,59 +204,60 @@ class RAGEngine:
         return self._attach_chunk_metadata(fixed_chunks)
 
     def _generate_answer_from_docs(self, user_query: str, docs: list[Document]):
-        citations = self._build_citations(docs)
-        relevant_chunks = [doc.page_content for doc in docs]
+        limited_docs = docs[:2]
+        citations = self._build_citations(limited_docs)
+        relevant_chunks = [doc.page_content[:1200] for doc in limited_docs]
 
         if not relevant_chunks:
             return "Khong co trong tai lieu.", citations
 
         context = "\n---\n".join(relevant_chunks)
         prompt = f"""
-[Vai tro]
-Ban la chuyen gia doc hieu va phan tich bai bao khoa hoc (AI/ML).
+[Vai trò]
+Bạn là chuyên gia đọc hiểu và phân tích bài báo khoa học (AI/ML).
 
-[Boi canh]
-Ban dang tra loi cau hoi dua tren ngu canh duoc truy xuat tu bai bao (RAG).
-Ngu canh co the khong day du, vi vay ban chi duoc phep su dung thong tin co trong ngu canh.
+[Bối cảnh]
+Bạn đang trả lời câu hỏi dựa trên ngữ cảnh được truy xuất từ bài báo (RAG).
+Ngữ cảnh có thể không đầy đủ, vì vậy bạn chỉ được phép sử dụng thông tin có trong ngữ cảnh.
 
-[Nhiem vu]
-Tra loi cau hoi theo 3 phan:
+[Nhiệm vụ]
+Trả lời câu hỏi theo 3 phần:
 
-1. **Answer (Cau tra loi chinh)**:
-   - Ngan gon, truc tiep (1-2 cau)
-   - Neu hoi "method chinh" -> chi chon 1 method quan trong nhat
+1. **Answer (Câu trả lời chính)**:
+   - Ngắn gọn, trực tiếp (1-2 câu)
+   - Nếu hỏi "method chính" thì chỉ chọn 1 method quan trọng nhất
 
-2. **Explanation (Giai thich)**:
-   - Giai thich vi sao cau tra loi dung
-   - Tong hop thong tin tu cac doan lien quan trong ngu canh
-   - Co the nhac den cac thanh phan, cong thuc, hoac co che lien quan
+2. **Explanation (Giải thích)**:
+   - Giải thích vì sao câu trả lời đúng
+   - Tổng hợp thông tin từ các đoạn liên quan trong ngữ cảnh
+   - Có thể nhắc đến các thành phần, công thức, hoặc cơ chế liên quan
 
-3. **Related Knowledge (Kien thuc lien quan)**:
-   - Chi bo sung neu trong ngu canh co de cap
-   - Vi du: phuong phap cai tien, bien the, hoac ky thuat lien quan
-   - Khong duoc them kien thuc ben ngoai
+3. **Related Knowledge (Kiến thức liên quan)**:
+   - Chỉ bổ sung nếu trong ngữ cảnh có đề cập
+   - Ví dụ: phương pháp cải tiến, biến thể, hoặc kỹ thuật liên quan
+   - Không được thêm kiến thức bên ngoài
 
-[Rang buoc]
-- CHI su dung thong tin tu ngu canh
-- Bat buoc tra loi 100 phan tram bang tieng Viet
-- KHONG duoc dung tieng Trung Quoc
-- KHONG suy dien ngoai
-- Neu khong co thong tin -> tra loi: "Khong co trong tai lieu"
-- Khong lan man
+[Ràng buộc]
+- CHỈ sử dụng thông tin từ ngữ cảnh
+- Bắt buộc trả lời 100 phần trăm bằng tiếng Việt có dấu
+- KHÔNG được dùng tiếng Trung Quốc
+- KHÔNG suy diễn ngoài
+- Nếu không có thông tin thì trả lời: "Không có trong tài liệu"
+- Không lan man
 
-[Dinh dang]
+[Định dạng]
 **Answer:** ...
 **Explanation:** ...
-**Related Knowledge:** ... (co the bo neu khong co)
+**Related Knowledge:** ... (có thể bỏ nếu không có)
 
 ---
 
-Cau hoi: {user_query}
+Câu hỏi: {user_query}
 
-Ngu canh:
+Ngữ cảnh:
 {context}
 
-Tra loi:
+Trả lời:
 """
         response = requests.post(
             f"{self.ollama_base_url}/api/generate",
@@ -266,6 +267,8 @@ Tra loi:
                 "stream": False,
                 "options": {
                     "temperature": 0.2,
+                    "num_ctx": 2048,
+                    "num_predict": 256,
                 },
             },
             timeout=180,
