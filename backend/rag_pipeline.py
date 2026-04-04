@@ -212,14 +212,44 @@ class RAGEngine:
 
         context = "\n---\n".join(relevant_chunks)
         prompt = f"""
-Ban la tro ly QA cho paper khoa hoc.
-Chi duoc tra loi dua tren ngu canh truy xuat ben duoi.
-Neu khong du thong tin, phai tra loi chinh xac: \"Khong co trong tai lieu\".
+[Vai tro]
+Ban la chuyen gia doc hieu va phan tich bai bao khoa hoc (AI/ML).
 
-Yeu cau:
-- Tra loi bang tieng Viet ro rang, ngan gon, khong suy dien qua ngu canh.
-- Neu phu hop, trinh bay theo 3 phan: Answer, Explanation, Related Knowledge.
-- Khong dua them kien thuc ben ngoai ngu canh.
+[Boi canh]
+Ban dang tra loi cau hoi dua tren ngu canh duoc truy xuat tu bai bao (RAG).
+Ngu canh co the khong day du, vi vay ban chi duoc phep su dung thong tin co trong ngu canh.
+
+[Nhiem vu]
+Tra loi cau hoi theo 3 phan:
+
+1. **Answer (Cau tra loi chinh)**:
+   - Ngan gon, truc tiep (1-2 cau)
+   - Neu hoi "method chinh" -> chi chon 1 method quan trong nhat
+
+2. **Explanation (Giai thich)**:
+   - Giai thich vi sao cau tra loi dung
+   - Tong hop thong tin tu cac doan lien quan trong ngu canh
+   - Co the nhac den cac thanh phan, cong thuc, hoac co che lien quan
+
+3. **Related Knowledge (Kien thuc lien quan)**:
+   - Chi bo sung neu trong ngu canh co de cap
+   - Vi du: phuong phap cai tien, bien the, hoac ky thuat lien quan
+   - Khong duoc them kien thuc ben ngoai
+
+[Rang buoc]
+- CHI su dung thong tin tu ngu canh
+- Bat buoc tra loi 100 phan tram bang tieng Viet
+- KHONG duoc dung tieng Trung Quoc
+- KHONG suy dien ngoai
+- Neu khong co thong tin -> tra loi: "Khong co trong tai lieu"
+- Khong lan man
+
+[Dinh dang]
+**Answer:** ...
+**Explanation:** ...
+**Related Knowledge:** ... (co the bo neu khong co)
+
+---
 
 Cau hoi: {user_query}
 
@@ -234,6 +264,9 @@ Tra loi:
                 "model": self.ollama_model,
                 "prompt": prompt,
                 "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                },
             },
             timeout=180,
         )
