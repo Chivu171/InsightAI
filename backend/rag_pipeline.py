@@ -7,6 +7,7 @@ import fitz
 import numpy as np
 import requests
 from dotenv import load_dotenv
+from google import genai
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 
@@ -33,8 +34,11 @@ class RAGEngine:
 
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.client = None
-        self.gemini_model = None
         self.google_model = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
+        self.gemini_model = self.google_model
+
+        if self.api_key:
+            self.client = genai.Client(api_key=self.api_key)
 
         self.embedding_model_name = os.getenv("EMBEDDING_MODEL", model_name)
         self.ollama_model = os.getenv("OLLAMA_MODEL", ollama_model)
@@ -217,55 +221,73 @@ class RAGEngine:
         context = "\n---\n".join(relevant_chunks)
         prompt = f"""
 [Vai tro]
-Ban la chuyen gia doc hieu va phan tich bai bao khoa hoc (AI/ML).
+Ban la tro ly AI ho tro sinh vien doc hieu va phan tich bai bao khoa hoc trong linh vuc AI/ML.
+
+[Muc tieu]
+Giup sinh vien:
+- nhanh chong hieu y chinh cua bai bao
+- xac dinh thong tin co thuc su nam trong tai lieu
+- phan biet giua noi dung duoc neu ro trong ngu canh va noi dung chi la suy luan
+- tiep tuc dao sau bang cac cau hoi lien quan
 
 [Boi canh]
-Ban dang tra loi cau hoi dua tren ngu canh duoc truy xuat tu bai bao (RAG).
-Ngu canh co the khong day du, vi vay uu tien cao nhat la su dung thong tin co trong ngu canh.
+Ban dang tra loi dua tren ngu canh duoc truy xuat tu bai bao bang he thong RAG.
+Ngu canh co the khong day du. Vi vay:
+- uu tien tuyet doi thong tin co trong ngu canh
+- khong duoc khang dinh dieu gi neu ngu canh khong ho tro
+- neu thong tin khong co trong ngu canh, phai noi ro "Khong co trong tai lieu"
 
 [Nhiem vu]
-Tra loi cau hoi theo 3 phan:
+Hay tra loi bang tieng Viet, ngan gon, ro rang, de sinh vien de doc.
+Trinh bay theo dung 4 muc sau:
 
-1. **Answer (Cau tra loi chinh)**:
-   - Ngan gon, truc tiep (1-2 cau)
-   - Neu hoi "method chinh" -> chi chon 1 method quan trong nhat
-   - Neu trong ngu canh khong du thong tin de tra loi day du, phai noi ro muc do thieu thong tin
+1. Tra loi chinh
+- Tra loi truc tiep cau hoi trong 1-2 cau
+- Neu cau hoi yeu cau "phuong phap chinh", "dong gop chinh", "van de chinh", chi chon 1 y quan trong nhat neu ngu canh cho phep
+- Neu ngu canh khong du, phai noi ro muc do thieu thong tin
 
-2. **Explanation (Giai thich)**:
-   - Giai thich vi sao cau tra loi dung
-   - Tong hop thong tin tu cac doan lien quan trong ngu canh
-   - Co the nhac den cac thanh phan, cong thuc, hoac co che lien quan
+2. Giai thich
+- Giai thich tai sao cau tra loi o muc 1 la hop ly
+- Tong hop cac y lien quan tu ngu canh
+- Neu can, tach thanh cac y nho:
+  - Y 1
+  - Y 2
+  - Y 3
+- Co the nhac den cong thuc, co che, thanh phan, hoac quan he giua cac phan trong bai bao
+- Khong dua thong tin ngoai ngu canh
 
-3. **Related Knowledge (Kien thuc lien quan)**:
-   - Neu trong ngu canh co de cap, bo sung cac phuong phap, bien the, hoac ky thuat lien quan trong bai bao
-   - Neu ngu canh khong co du lieu de tra loi cau hoi, ban duoc phep bo sung mot so y chinh hoac kien thuc nen tang ben ngoai bai bao
-   - Khi bo sung kien thuc ben ngoai, bat buoc ghi ro: "Phan duoi day la kien thuc bo sung ngoai tai lieu"
-   - Phan bo sung chi duoc ngan gon, dung de dinh huong hieu van de, khong duoc gia vo la noi dung co trong bai bao
+3. Noi dung lien quan trong bai
+- Neu trong ngu canh co de cap, liet ke ngan gon cac phuong phap, bien the, ky thuat, han che, hoac khoi niem lien quan
+- Muc nay chi duoc dua tren ngu canh vua truy xuat
+- Neu khong co gi lien quan ro rang, viet: "Khong co them thong tin lien quan trong phan ngu canh nay"
+
+4. Cau hoi goi y hoc tiep
+- Chi dua ra muc nay neu ngu canh khong du de tra loi tron ven, hoac khi co nhung huong mo rong ro rang trong ngu canh
+- Dua ra 2-3 cau hoi tiep theo ma sinh vien nen hoi
+- Cac cau hoi goi y phai dua tren ngu canh da truy xuat, khong duoc mo rong ra ngoai tai lieu
 
 [Rang buoc]
-- Uu tien su dung thong tin tu ngu canh
-- Bat buoc tra loi 100 phan tram bang tieng Viet
-- KHONG duoc dung tieng Trung Quoc
-- KHONG suy dien rang bai bao co noi dung ma ngu canh khong cung cap
-- Neu khong co thong tin trong ngu canh, phai noi ro: "Khong co trong tai lieu"
-- Neu bo sung kien thuc ngoai tai lieu, phai tach biet ro voi noi dung trong tai lieu
+- Bat buoc 100% bang tieng Viet
+- Khong duoc dung tieng Trung Quoc
+- Khong duoc suy dien rang bai bao co noi dung ma ngu canh khong cung cap
+- Neu khong co thong tin, phai noi ro: "Khong co trong tai lieu"
 - Khong lan man
+- Uu tien ro y hon van phong hoa my
+- Neu ngu canh chi ho tro mot phan cau hoi, phai noi ro phan nao tra loi duoc, phan nao chua du thong tin
 
-[Dinh dang]
-**Answer:** ...
-**Explanation:** ...
-**Related Knowledge:** ...
-- Neu la noi dung trong tai lieu, trinh bay binh thuong
-- Neu la noi dung ngoai tai lieu, mo dau bang: "Phan duoi day la kien thuc bo sung ngoai tai lieu: ..."
+[Dinh dang bat buoc]
+1. Tra loi chinh: ...
+2. Giai thich:
+- ...
+- ...
+3. Noi dung lien quan trong bai:
+- ...
+- ...
+4. Cau hoi goi y hoc tiep:
+- ...
+- ...
 
 ---
-
-Cau hoi: {user_query}
-
-Ngu canh:
-{context}
-
-Tra loi:
 
 Cau hoi: {user_query}
 
@@ -524,53 +546,6 @@ Tra loi:
         scored_docs.sort(key=lambda x: x[0], reverse=True)
         return [doc for _, doc in scored_docs[:top_k]]
 
-    def _rerank_with_scores(self, query: str, docs: list[Document], top_k: int = 5) -> list[tuple[float, Document]]:
-        if not docs:
-            return []
-
-        pairs = [(query, doc.page_content) for doc in docs]
-        scores = self.reranker.predict(pairs)
-        scored_docs = list(zip(scores, docs))
-        scored_docs.sort(key=lambda x: x[0], reverse=True)
-        return [(float(score), doc) for score, doc in scored_docs[:top_k]]
-
-    def _is_low_confidence(
-        self,
-        scored_docs: list[tuple[float, Document]],
-        rerank_threshold: float = 0.25,
-        min_support_docs: int = 1,
-    ) -> bool:
-        if not scored_docs:
-            return True
-
-        top_score = scored_docs[0][0]
-        strong_hits = sum(1 for score, _ in scored_docs if score >= rerank_threshold)
-
-        if top_score < rerank_threshold:
-            return True
-
-        if strong_hits < min_support_docs:
-            return True
-
-        return False
-
-    @staticmethod
-    def _is_fallback_answer(answer: str) -> bool:
-        return answer.startswith("Khong co thong tin ro rang trong tai lieu")
-
-    def _generate_fallback_answer(self, user_query: str, docs: list[Document]):
-        citations = self._build_citations(docs[:2])
-
-        answer = (
-            "Khong co thong tin ro rang trong tai lieu de tra loi cau hoi nay.\n\n"
-            "Ban co the thu hoi lai theo huong lien quan hon:\n"
-            "- ten phuong phap, mo hinh hoac thuat toan\n"
-            "- dataset, metric, ket qua thuc nghiem\n"
-            "- mot section, bang, hinh hoac tu khoa cu the trong tai lieu"
-        )
-
-        return answer, citations
-
     @staticmethod
     def _build_citations(docs: list[Document]) -> list[dict]:
         citations = []
@@ -598,17 +573,8 @@ Tra loi:
         bm25_results = self._bm25_retrieve(user_query, k=k * 5)
         dense_results = self._dense_retrieve(user_query, k=k * 5)
         fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
-        reranked_results = self._rerank_with_scores(user_query, fused_results, top_k=k)
-
-        if not reranked_results:
-            return self._generate_fallback_answer(user_query, [])
-
-        if self._is_low_confidence(reranked_results):
-            fallback_docs = [doc for _, doc in reranked_results]
-            return self._generate_fallback_answer(user_query, fallback_docs)
-
-        final_docs = [doc for _, doc in reranked_results]
-        return self._generate_answer_from_docs(user_query, final_docs)
+        reranked_results = self._rerank(user_query, fused_results, top_k=k)
+        return self._generate_answer_from_docs(user_query, reranked_results)
 
     def query_fixed_chunking(self, user_query, k=3):
         if self.retriever is None or self.chunking_mode != "fixed":
@@ -620,14 +586,5 @@ Tra loi:
         bm25_results = self._bm25_retrieve(user_query, k=k * 5)
         dense_results = self._dense_retrieve(user_query, k=k * 5)
         fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
-        reranked_results = self._rerank_with_scores(user_query, fused_results, top_k=k)
-
-        if not reranked_results:
-            return self._generate_fallback_answer(user_query, [])
-
-        if self._is_low_confidence(reranked_results):
-            fallback_docs = [doc for _, doc in reranked_results]
-            return self._generate_fallback_answer(user_query, fallback_docs)
-
-        final_docs = [doc for _, doc in reranked_results]
-        return self._generate_answer_from_docs(user_query, final_docs)
+        reranked_results = self._rerank(user_query, fused_results, top_k=k)
+        return self._generate_answer_from_docs(user_query, reranked_results)

@@ -84,9 +84,6 @@ export function ChatPanel({
   const currentModeState = modeBuildState[selectedMode];
   const modeReady = currentModeState.status === "ready";
 
-  const isFallbackAnswer = (content: string) =>
-    content.startsWith("Khong co thong tin ro rang trong tai lieu");
-
   const handleSend = async (customInput?: string) => {
     const messageText = customInput || input.trim();
     if (!messageText || isLoading || !modeReady) return;
@@ -361,10 +358,6 @@ export function ChatPanel({
                     >
                       {message.role === "user" ? (
                         <p className="whitespace-pre-wrap text-sm leading-7">{message.content}</p>
-                      ) : isFallbackAnswer(message.content) ? (
-                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-7 text-amber-950">
-                          <p className="whitespace-pre-wrap">{message.content}</p>
-                        </div>
                       ) : (
                         <div className="prose prose-sm max-w-none prose-zinc">
                           <ReactMarkdown

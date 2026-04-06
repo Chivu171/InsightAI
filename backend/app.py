@@ -31,10 +31,10 @@ with st.sidebar:
     if st.button("Re-index Data"):
         if uploaded_file:
             with st.spinner("Đang xử lý dữ liệu..."):
-                text = st.session_state.rag.extract_text(uploaded_file)
-                if text:
+                documents = st.session_state.rag.extract_documents(uploaded_file)
+                if documents:
                     st.session_state.rag.clear_index()
-                    st.session_state.rag.build_index(text)
+                    st.session_state.rag.build_index(documents)
                     st.session_state.rag.save_index()
                     st.success(f"Đã index xong từ {uploaded_file.name}!")
                 else:
@@ -64,10 +64,7 @@ if prompt := st.chat_input("Nhập câu hỏi tại đây..."):
         else:
             with st.spinner("Đang tìm câu trả lời..."):
                 answer, sources = st.session_state.rag.query(prompt)
-                if st.session_state.rag._is_fallback_answer(answer):
-                    st.info(answer)
-                else:
-                    st.markdown(answer)
+                st.markdown(answer)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
 
                 # Expander for sources
