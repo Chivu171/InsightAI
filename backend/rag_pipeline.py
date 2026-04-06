@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 
-from langchain_classic.retrievers import ParentDocumentRetriever
+try:
+    from langchain_classic.retrievers import ParentDocumentRetriever
+except ImportError:
+    from langchain.retrievers import ParentDocumentRetriever
 from langchain_core.stores import InMemoryStore
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -31,6 +34,7 @@ class RAGEngine:
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.client = None
         self.gemini_model = None
+        self.google_model = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
 
         self.embedding_model_name = os.getenv("EMBEDDING_MODEL", model_name)
         self.ollama_model = os.getenv("OLLAMA_MODEL", ollama_model)
@@ -217,7 +221,7 @@ Ban la chuyen gia doc hieu va phan tich bai bao khoa hoc (AI/ML).
 
 [Boi canh]
 Ban dang tra loi cau hoi dua tren ngu canh duoc truy xuat tu bai bao (RAG).
-Ngu canh co the khong day du, vi vay ban chi duoc phep su dung thong tin co trong ngu canh.
+Ngu canh co the khong day du, vi vay uu tien cao nhat la su dung thong tin co trong ngu canh.
 
 [Nhiem vu]
 Tra loi cau hoi theo 3 phan:
@@ -225,6 +229,7 @@ Tra loi cau hoi theo 3 phan:
 1. **Answer (Cau tra loi chinh)**:
    - Ngan gon, truc tiep (1-2 cau)
    - Neu hoi "method chinh" -> chi chon 1 method quan trong nhat
+   - Neu trong ngu canh khong du thong tin de tra loi day du, phai noi ro muc do thieu thong tin
 
 2. **Explanation (Giai thich)**:
    - Giai thich vi sao cau tra loi dung
@@ -232,22 +237,26 @@ Tra loi cau hoi theo 3 phan:
    - Co the nhac den cac thanh phan, cong thuc, hoac co che lien quan
 
 3. **Related Knowledge (Kien thuc lien quan)**:
-   - Chi bo sung neu trong ngu canh co de cap
-   - Vi du: phuong phap cai tien, bien the, hoac ky thuat lien quan
-   - Khong duoc them kien thuc ben ngoai
+   - Neu trong ngu canh co de cap, bo sung cac phuong phap, bien the, hoac ky thuat lien quan trong bai bao
+   - Neu ngu canh khong co du lieu de tra loi cau hoi, ban duoc phep bo sung mot so y chinh hoac kien thuc nen tang ben ngoai bai bao
+   - Khi bo sung kien thuc ben ngoai, bat buoc ghi ro: "Phan duoi day la kien thuc bo sung ngoai tai lieu"
+   - Phan bo sung chi duoc ngan gon, dung de dinh huong hieu van de, khong duoc gia vo la noi dung co trong bai bao
 
 [Rang buoc]
-- CHI su dung thong tin tu ngu canh
+- Uu tien su dung thong tin tu ngu canh
 - Bat buoc tra loi 100 phan tram bang tieng Viet
 - KHONG duoc dung tieng Trung Quoc
-- KHONG suy dien ngoai
-- Neu khong co thong tin -> tra loi: "Khong co trong tai lieu"
+- KHONG suy dien rang bai bao co noi dung ma ngu canh khong cung cap
+- Neu khong co thong tin trong ngu canh, phai noi ro: "Khong co trong tai lieu"
+- Neu bo sung kien thuc ngoai tai lieu, phai tach biet ro voi noi dung trong tai lieu
 - Khong lan man
 
 [Dinh dang]
 **Answer:** ...
 **Explanation:** ...
-**Related Knowledge:** ... (co the bo neu khong co)
+**Related Knowledge:** ...
+- Neu la noi dung trong tai lieu, trinh bay binh thuong
+- Neu la noi dung ngoai tai lieu, mo dau bang: "Phan duoi day la kien thuc bo sung ngoai tai lieu: ..."
 
 ---
 
@@ -257,7 +266,35 @@ Ngu canh:
 {context}
 
 Tra loi:
+
+Cau hoi: {user_query}
+
+Ngu canh:
+{context}
+
+Tra loi:
 """
+        try:
+            answer = self._generate_with_ollama(prompt)
+        except requests.RequestException as ollama_error:
+            if not self.api_key:
+                print(f"[Generate] Ollama error and no Google API key available: {ollama_error}")
+                return "Khong the ket noi Ollama va chua cung cap Google API Key.", citations
+
+            try:
+                answer = self._generate_with_google(prompt)
+            except requests.RequestException as google_error:
+                print(f"[Generate] Ollama error: {ollama_error}")
+                print(f"[Generate] Google API error: {google_error}")
+                return (
+                    "Khong the ket noi Ollama. Google API loi: "
+                    f"{self._format_request_error(google_error)}",
+                    citations,
+                )
+
+        return answer or "Khong co trong tai lieu.", citations
+
+    def _generate_with_ollama(self, prompt: str) -> str:
         response = requests.post(
             f"{self.ollama_base_url}/api/generate",
             json={
@@ -272,8 +309,51 @@ Tra loi:
         )
         response.raise_for_status()
         payload = response.json()
-        answer = payload.get("response", "").strip()
-        return answer or "Khong co trong tai lieu.", citations
+        return payload.get("response", "").strip()
+
+    def _generate_with_google(self, prompt: str) -> str:
+        self.api_key = os.getenv("GOOGLE_API_KEY", self.api_key)
+        response = requests.post(
+            (
+                "https://generativelanguage.googleapis.com/v1/models/"
+                f"{self.google_model}:generateContent?key={self.api_key}"
+            ),
+            json={
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": prompt,
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.2,
+                },
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        candidates = payload.get("candidates", [])
+        if not candidates:
+            return ""
+
+        content = candidates[0].get("content", {})
+        parts = content.get("parts", [])
+        texts = [part.get("text", "") for part in parts if part.get("text")]
+        return "\n".join(texts).strip()
+
+    @staticmethod
+    def _format_request_error(error: requests.RequestException) -> str:
+        response = getattr(error, "response", None)
+        if response is not None:
+            body = response.text.strip().replace("\n", " ")
+            if len(body) > 300:
+                body = body[:300] + "..."
+            return f"HTTP {response.status_code} - {body or response.reason}"
+        return str(error)
 
     def build_index(self, text_or_docs):
         self.status = "processing"
@@ -444,6 +524,53 @@ Tra loi:
         scored_docs.sort(key=lambda x: x[0], reverse=True)
         return [doc for _, doc in scored_docs[:top_k]]
 
+    def _rerank_with_scores(self, query: str, docs: list[Document], top_k: int = 5) -> list[tuple[float, Document]]:
+        if not docs:
+            return []
+
+        pairs = [(query, doc.page_content) for doc in docs]
+        scores = self.reranker.predict(pairs)
+        scored_docs = list(zip(scores, docs))
+        scored_docs.sort(key=lambda x: x[0], reverse=True)
+        return [(float(score), doc) for score, doc in scored_docs[:top_k]]
+
+    def _is_low_confidence(
+        self,
+        scored_docs: list[tuple[float, Document]],
+        rerank_threshold: float = 0.25,
+        min_support_docs: int = 1,
+    ) -> bool:
+        if not scored_docs:
+            return True
+
+        top_score = scored_docs[0][0]
+        strong_hits = sum(1 for score, _ in scored_docs if score >= rerank_threshold)
+
+        if top_score < rerank_threshold:
+            return True
+
+        if strong_hits < min_support_docs:
+            return True
+
+        return False
+
+    @staticmethod
+    def _is_fallback_answer(answer: str) -> bool:
+        return answer.startswith("Khong co thong tin ro rang trong tai lieu")
+
+    def _generate_fallback_answer(self, user_query: str, docs: list[Document]):
+        citations = self._build_citations(docs[:2])
+
+        answer = (
+            "Khong co thong tin ro rang trong tai lieu de tra loi cau hoi nay.\n\n"
+            "Ban co the thu hoi lai theo huong lien quan hon:\n"
+            "- ten phuong phap, mo hinh hoac thuat toan\n"
+            "- dataset, metric, ket qua thuc nghiem\n"
+            "- mot section, bang, hinh hoac tu khoa cu the trong tai lieu"
+        )
+
+        return answer, citations
+
     @staticmethod
     def _build_citations(docs: list[Document]) -> list[dict]:
         citations = []
@@ -471,12 +598,17 @@ Tra loi:
         bm25_results = self._bm25_retrieve(user_query, k=k * 5)
         dense_results = self._dense_retrieve(user_query, k=k * 5)
         fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
-        reranked_results = self._rerank(user_query, fused_results, top_k=k)
+        reranked_results = self._rerank_with_scores(user_query, fused_results, top_k=k)
 
         if not reranked_results:
-            return self._generate_answer_from_docs(user_query, [])
+            return self._generate_fallback_answer(user_query, [])
 
-        return self._generate_answer_from_docs(user_query, reranked_results)
+        if self._is_low_confidence(reranked_results):
+            fallback_docs = [doc for _, doc in reranked_results]
+            return self._generate_fallback_answer(user_query, fallback_docs)
+
+        final_docs = [doc for _, doc in reranked_results]
+        return self._generate_answer_from_docs(user_query, final_docs)
 
     def query_fixed_chunking(self, user_query, k=3):
         if self.retriever is None or self.chunking_mode != "fixed":
@@ -488,5 +620,14 @@ Tra loi:
         bm25_results = self._bm25_retrieve(user_query, k=k * 5)
         dense_results = self._dense_retrieve(user_query, k=k * 5)
         fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
-        reranked_results = self._rerank(user_query, fused_results, top_k=k)
-        return self._generate_answer_from_docs(user_query, reranked_results)
+        reranked_results = self._rerank_with_scores(user_query, fused_results, top_k=k)
+
+        if not reranked_results:
+            return self._generate_fallback_answer(user_query, [])
+
+        if self._is_low_confidence(reranked_results):
+            fallback_docs = [doc for _, doc in reranked_results]
+            return self._generate_fallback_answer(user_query, fallback_docs)
+
+        final_docs = [doc for _, doc in reranked_results]
+        return self._generate_answer_from_docs(user_query, final_docs)

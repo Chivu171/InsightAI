@@ -64,7 +64,10 @@ if prompt := st.chat_input("Nhập câu hỏi tại đây..."):
         else:
             with st.spinner("Đang tìm câu trả lời..."):
                 answer, sources = st.session_state.rag.query(prompt)
-                st.markdown(answer)
+                if st.session_state.rag._is_fallback_answer(answer):
+                    st.info(answer)
+                else:
+                    st.markdown(answer)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
 
                 # Expander for sources
