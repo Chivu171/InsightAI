@@ -22,7 +22,7 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Document } from "./DocumentSidebar";
 import type { ChunkingMode, ModeBuildState } from "../App";
-import { API_BASE_URL } from "../api";
+import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -100,12 +100,12 @@ export function ChatPanel({
     setIsLoading(true);
 
     try {
-      const queryEndpoint =
+      const queryPath =
         selectedMode === "hybrid"
-          ? `${API_BASE_URL}/queryHybrid`
-          : `${API_BASE_URL}/querySimpleChunking`;
+          ? "/queryHybrid"
+          : "/querySimpleChunking";
 
-      const response = await fetch(queryEndpoint, {
+      const response = await apiFetch(queryPath, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
