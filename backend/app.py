@@ -16,14 +16,7 @@ if "messages" not in st.session_state:
 # Sidebar
 with st.sidebar:
     st.title("⚙️ Cấu hình")
-    api_key = st.text_input("Google API Key", type="password", value=os.getenv("GOOGLE_API_KEY", ""))
-    if api_key:
-        os.environ["GOOGLE_API_KEY"] = api_key
-        # Re-init if key changed
-        if st.session_state.rag.api_key != api_key:
-             st.session_state.rag = RAGEngine()
-             st.session_state.rag.load_index()
-    
+
     st.divider()
     st.subheader("📁 Dữ liệu")
     uploaded_file = st.file_uploader("Tải lên file PDF hoặc Text", type=["pdf", "txt"])
