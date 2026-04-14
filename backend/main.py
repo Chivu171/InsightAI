@@ -20,13 +20,18 @@ app.add_middleware(
 rag_hybrid = RAGEngine()
 rag_hybrid.load_index()
 rag_fixed = RAGEngine()
+rag_structural = RAGEngine()
+
+# Ensure temp directory for Docling
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 class QueryRequest(BaseModel):
     query: str
 
 
 def get_engine(mode: str) -> RAGEngine:
-    engine = {"hybrid": rag_hybrid, "fixed": rag_fixed}.get(mode)
+    engine = {"hybrid": rag_hybrid, "fixed": rag_fixed, "structural": rag_structural}.get(mode)
     if engine is None:
         raise HTTPException(status_code=404, detail="Mode not found.")
     return engine
@@ -43,6 +48,11 @@ async def get_status():
             "status": "ready" if rag_fixed.vectorstore is not None else "no_index",
             "vector_count": rag_fixed.vectorstore.index.ntotal if rag_fixed.vectorstore else 0,
             "chunking_mode": rag_fixed.chunking_mode,
+        },
+        "structural": {
+            "status": "ready" if rag_structural.section_vectorstore is not None else "no_index",
+            "vector_count": rag_structural.vectorstore.index.ntotal if rag_structural.vectorstore else 0,
+            "chunking_mode": rag_structural.chunking_mode,
         },
     }
 
@@ -97,6 +107,31 @@ async def upload_simple_chunking(file: UploadFile = File(...), background_tasks:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/uploadStructural")
+async def upload_structural(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+    try:
+        # Docling needs a physical file path
+        file_path = os.path.join(UPLOAD_DIR, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        def process():
+            rag_structural.clear_index()
+            rag_structural.build_structure_index(file_path)
+            # Optional: Clean up after indexing
+            # os.remove(file_path)
+
+        background_tasks.add_task(process)
+
+        return {
+            "message": "File uploaded. Structural indexing in progress...",
+            "status": "processing",
+            "mode": "structural",
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/progress")
 async def get_progress():
     return {
@@ -107,6 +142,10 @@ async def get_progress():
         "fixed": {
             "status": rag_fixed.status,
             "progress": rag_fixed.progress,
+        },
+        "structural": {
+            "status": rag_structural.status,
+            "progress": rag_structural.progress,
         },
     }
 
@@ -157,6 +196,18 @@ async def query_simple_chunking(request: QueryRequest):
         }
     except Exception as e:
         print("querySimpleChunking error:", repr(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/queryStructural")
+async def query_structural(request: QueryRequest):
+    try:
+        answer, sources = rag_structural.query_with_structure(request.query)
+        return {
+            "answer": answer,
+            "sources": sources,
+            "mode": "structural",
+        }
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

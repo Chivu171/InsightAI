@@ -2,6 +2,7 @@ import os
 import pickle
 import re
 from datetime import datetime, timezone
+from typing import List, Dict, Optional
 
 import fitz
 import numpy as np
@@ -21,6 +22,8 @@ from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from document_structurer import DocumentStructurer
 
 
 class RAGEngine:
@@ -58,6 +61,11 @@ class RAGEngine:
         self.bm25_corpus = []
         self.all_chunks = []
         self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+        self.structurer = DocumentStructurer()
+        self.section_vectorstore = None
+        self.section_docs = []
+        self.section_bm25 = None
 
     def clear_index(self):
         self.vectorstore = None
@@ -391,6 +399,136 @@ Trả lời:
         print(f"[Hybrid] Built BM25 index with {len(self.all_chunks)} chunks")
         return self.vectorstore, parent_docs
 
+    def build_structure_index(self, file_path: str):
+        self.status = "processing"
+        self.progress = 10
+        
+        # 1. Structural Parsing
+        raw_sections = self.structurer.process_file(file_path)
+        self.progress = 30
+        
+        if not raw_sections:
+            raise ValueError("No sections found in the document.")
+
+        # 2. Section Summarization (Enrichment)
+        print(f"[Structure] Summarizing {len(raw_sections)} sections for better routing...")
+        enriched_sections = []
+        for i, sec in enumerate(raw_sections):
+            summary = self._summarize_section(sec.page_content)
+            sec.metadata["section_summary"] = summary
+            # We index a combination of title and summary for the router
+            routing_text = f"Title: {sec.metadata['section_title']}\nSummary: {summary}"
+            enriched_sections.append(Document(page_content=routing_text, metadata=sec.metadata))
+            self.progress = 30 + int((i / len(raw_sections)) * 30)
+        
+        self.section_docs = enriched_sections
+        self.progress = 60
+
+        # 3. Build Section Index (Router - Hybrid)
+        print(f"[Structure] Building hybrid section index...")
+        self.section_vectorstore = FAISS.from_documents(self.section_docs, self.embeddings)
+        section_tokenized = [self._tokenize(doc.page_content) for doc in self.section_docs]
+        self.section_bm25 = BM25Okapi(section_tokenized)
+        
+        # 4. Build Content Index (Chunks)
+        self.progress = 70
+        all_child_chunks = []
+        for sec_doc in raw_sections:
+            chunks = self.child_splitter.split_documents([sec_doc])
+            all_child_chunks.extend(chunks)
+        
+        self.progress = 90
+        self.vectorstore = FAISS.from_documents(all_child_chunks, self.embeddings)
+        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 15})
+        
+        # 5. Global BM25 for chunks
+        self.all_chunks = all_child_chunks
+        self.bm25_corpus = [self._tokenize(doc.page_content) for doc in self.all_chunks]
+        self.bm25_index = BM25Okapi(self.bm25_corpus)
+        
+        self.chunking_mode = "structure"
+        self.progress = 100
+        self.status = "done"
+        print(f"[Structure] Built enhanced hierarchical index with {len(all_child_chunks)} chunks and {len(self.section_docs)} summaries")
+        return self.vectorstore, self.section_vectorstore
+
+    def _summarize_section(self, text: str) -> str:
+        """Uses LLM to generate a 1-sentence summary of the section for routing."""
+        prompt = f"Summarize the following document section in ONE concise sentence for search indexing purposes. Focus on the core topics discussed:\n\n{text[:3000]}"
+        try:
+            # Try Gemini first
+            if self.api_key:
+                summary = self._generate_with_google(prompt)
+                if summary: return summary
+            # Fallback to a truncation of the text
+            return text[:200].replace("\n", " ") + "..."
+        except:
+            return text[:200].replace("\n", " ") + "..."
+
+    def _route_query(self, query: str, k: int = 4) -> List[str]:
+        """
+        Routes the query using Hybrid search (Dense + BM25) on section summaries.
+        """
+        if not self.section_vectorstore or not self.section_bm25:
+            return []
+        
+        # Dense
+        dense_results = self.section_vectorstore.similarity_search(query, k=k)
+        
+        # BM25
+        query_tokens = self._tokenize(query)
+        bm25_scores = self.section_bm25.get_scores(query_tokens)
+        top_bm25_indices = np.argsort(bm25_scores)[::-1][:k]
+        bm25_results = [self.section_docs[i] for i in top_bm25_indices if bm25_scores[i] > 0]
+        
+        # Combine
+        combined = dense_results + bm25_results
+        paths = [doc.metadata.get("section_path") for doc in combined]
+        return list(set(paths))
+
+    def query_with_structure(self, user_query: str, k: int = 5):
+        """
+        Structure-aware query: Route -> Soft Filtering (Boost) -> Generate.
+        """
+        if self.section_vectorstore is None:
+            return self.query(user_query, k=k)
+
+        # 1. Hybrid Routing (Find top 4 sections)
+        relevant_paths = self._route_query(user_query, k=4)
+        print(f"[Structure] Routing query to: {relevant_paths}")
+        
+        # 2. Global Hybrid Retrieval (Get 20 candidates)
+        bm25_results = self._bm25_retrieve(user_query, k=20)
+        dense_results = self._dense_retrieve(user_query, k=20)
+        
+        # 3. Soft Filtering (Scoring Boost)
+        # We manually score chunks: Base Score (Rank) + Boost (if in relevant section)
+        # Deduplicate manually as Document is unhashable
+        seen_content = set()
+        candidates = []
+        for doc in bm25_results + dense_results:
+            if doc.page_content not in seen_content:
+                seen_content.add(doc.page_content)
+                candidates.append(doc)
+
+        scored_candidates = []
+        
+        for doc in candidates:
+            score = 0.0
+            # Boost if the chunk belongs to a routed section
+            if doc.metadata.get("section_path") in relevant_paths:
+                score += 1.0
+            
+            # Additional boost if it's a high-level section match
+            scored_candidates.append((score, doc))
+        
+        # Sort by boost score, then fall back to original similarity (dense_results order)
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        final_results = [doc for score, doc in scored_candidates[:k]]
+
+        # 4. Generate Answer
+        return self._generate_answer_from_docs(user_query, final_results)
+
     def build_fixed_chunk_index(self, text_or_docs, chunk_size=800, overlap=250):
         self.status = "processing"
         self.progress = 10
@@ -435,17 +573,38 @@ Trả lời:
                 },
                 f,
             )
+        
+        # Save section-related data if in structure mode
+        if self.section_vectorstore:
+            section_path = os.path.join(folder_path, "sections")
+            os.makedirs(section_path, exist_ok=True)
+            self.section_vectorstore.save_local(section_path)
+            with open(os.path.join(section_path, "section_data.pkl"), "wb") as f:
+                pickle.dump({
+                    "section_docs": self.section_docs,
+                    "section_bm25": self.section_bm25
+                }, f)
+        
+        # Save config
+        with open(os.path.join(folder_path, "config.pkl"), "wb") as f:
+            pickle.dump({"chunking_mode": self.chunking_mode}, f)
+            
         return True
 
     def load_index(self, folder_path="vector_db"):
         if not os.path.exists(os.path.join(folder_path, "index.faiss")):
             return False
 
-        self.vectorstore = FAISS.load_local(
-            folder_path,
-            self.embeddings,
-            allow_dangerous_deserialization=True,
-        )
+        try:
+            self.vectorstore = FAISS.load_local(
+                folder_path,
+                self.embeddings,
+                allow_dangerous_deserialization=True,
+            )
+        except Exception as e:
+            print(f"[Load] FAISS load error: {e}")
+            return False
+
         docstore_path = os.path.join(folder_path, "docstore.pkl")
         if os.path.exists(docstore_path):
             with open(docstore_path, "rb") as f:
@@ -465,9 +624,31 @@ Trả lời:
             self.all_chunks = data["all_chunks"]
             self.bm25_corpus = data["bm25_corpus"]
             self.bm25_index = BM25Okapi(self.bm25_corpus)
-            print(f"[Hybrid] Loaded BM25 index with {len(self.all_chunks)} chunks")
 
-        self.chunking_mode = "semantic"
+        # Load section-related data if exists
+        section_path = os.path.join(folder_path, "sections")
+        if os.path.exists(os.path.join(section_path, "index.faiss")):
+            self.section_vectorstore = FAISS.load_local(
+                section_path,
+                self.embeddings,
+                allow_dangerous_deserialization=True
+            )
+            with open(os.path.join(section_path, "section_data.pkl"), "rb") as f:
+                sec_data = pickle.load(f)
+                self.section_docs = sec_data["section_docs"]
+                self.section_bm25 = sec_data["section_bm25"]
+            print(f"[Load] Section indexes restored.")
+
+        # Load config
+        config_path = os.path.join(folder_path, "config.pkl")
+        if os.path.exists(config_path):
+            with open(config_path, "rb") as f:
+                config = pickle.load(f)
+                self.chunking_mode = config.get("chunking_mode", "semantic")
+        else:
+            self.chunking_mode = "semantic"
+            
+        print(f"[Load] Index loaded with mode: {self.chunking_mode}")
         return True
 
     def _bm25_retrieve(self, query: str, k: int = 10) -> list[Document]:
@@ -537,6 +718,8 @@ Trả lời:
                     "chunk_index": metadata.get("chunk_index"),
                     "file_type": metadata.get("file_type"),
                     "uploaded_at": metadata.get("uploaded_at"),
+                    "section_path": metadata.get("section_path"),
+                    "section_title": metadata.get("section_title"),
                     "snippet": snippet[:320],
                 }
             )
