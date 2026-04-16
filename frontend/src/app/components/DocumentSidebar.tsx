@@ -402,7 +402,9 @@ export function DocumentSidebar({
                     variant="ghost"
                     size="sm"
                     onClick={() => removeDocument(doc.id)}
-                    className="h-8 w-8 p-0 opacity-0 transition-opacity group-hover:opacity-100"
+                    className="h-8 w-8 shrink-0 p-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+                    aria-label={`Xóa tài liệu ${doc.name}`}
+                    title={`Xóa ${doc.name}`}
                   >
                     <Trash2 className="size-4 text-red-500" />
                   </Button>

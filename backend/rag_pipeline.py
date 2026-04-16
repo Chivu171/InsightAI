@@ -46,8 +46,8 @@ class RAGEngine:
             self.client = genai.Client(api_key=self.api_key)
 
         self.embedding_model_name = os.getenv("EMBEDDING_MODEL", model_name)
-        self.ollama_model = os.getenv("OLLAMA_MODEL", ollama_model)
-        self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", ollama_base_url).rstrip("/")
+        self.local_model = os.getenv("LMSTUDIO_MODEL")
+        self.local_base_url = os.getenv("LMSTUDIO_BASE_URL").rstrip("/")
 
         self.embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model_name)
         self.vectorstore = None
@@ -263,55 +263,34 @@ class RAGEngine:
 [Vai trò]
 Bạn là trợ lý AI hỗ trợ người dùng đọc hiểu, phân tích và tra cứu thông tin từ tài liệu.
 
-[Mục tiêu]
-Giúp người dùng:
-- nhanh chóng hiểu ý chính của tài liệu
-- xác định thông tin có thực sự nằm trong tài liệu hay không
-- phân biệt giữa nội dung được nêu rõ trong ngữ cảnh và nội dung chưa có đủ bằng chứng
-- tiếp tục đào sâu bằng các câu hỏi liên quan
-
 [Bối cảnh]
 Bạn đang trả lời dựa trên ngữ cảnh được truy xuất từ tài liệu bằng hệ thống RAG.
 Tài liệu có thể là PDF, TXT, CSV hoặc dữ liệu văn bản/bảng biểu tương tự.
-Ngữ cảnh có thể không đầy đủ. Vì vậy:
-- ưu tiên tuyệt đối thông tin có trong ngữ cảnh
-- không được khẳng định điều gì nếu ngữ cảnh không hỗ trợ
-- nếu thông tin không có trong ngữ cảnh, phải nói rõ: "Không có trong tài liệu"
+Ngữ cảnh được cung cấp có thể chưa đầy đủ, nên bạn phải ưu tiên thông tin có trong ngữ cảnh trước.
+
+[Mục tiêu]
+Giúp người dùng:
+- hiểu đúng nội dung tài liệu
+- xác định thông tin nào thực sự có trong tài liệu
+- phân biệt giữa nội dung có căn cứ trong tài liệu và phần suy luận/mở rộng
+- nhận được câu trả lời rõ ràng, hữu ích và đủ chiều sâu khi cần
 
 [Nhiệm vụ]
-Hãy trả lời bằng tiếng Việt, ngắn gọn, rõ ràng, đúng cấu trúc dưới đây.
-Nếu ngữ cảnh không đủ để trả lời, phải nói rõ "Không có trong tài liệu" và chỉ mô tả những gì ngữ cảnh đang cho thấy.
-
-[Cách xử lý theo loại dữ liệu]
-- Nếu ngữ cảnh là đoạn văn bản: tóm tắt và giải thích bám sát nội dung được cung cấp.
-- Nếu ngữ cảnh là dữ liệu bảng hoặc CSV: ưu tiên đọc theo cột, hàng, giá trị, xu hướng, điều kiện so sánh hoặc các trường liên quan trong ngữ cảnh.
-- Không được tự suy ra các cột, hàng, ý nghĩa hoặc kết luận nếu ngữ cảnh không thể hiện rõ.
-- Nếu câu hỏi yêu cầu tính toán, so sánh hoặc thống kê nhưng ngữ cảnh không đủ dữ liệu, phải nói rõ phần thiếu.
+Hãy trả lời câu hỏi của người dùng bằng tiếng Việt.
+Tập trung vào việc trả lời đúng ý, rõ ràng, dễ hiểu và bám sát ngữ cảnh.
+Không cần theo một cấu trúc trả lời cố định.
+Có thể trả lời ngắn hoặc dài tùy theo câu hỏi.
+Khi phù hợp, có thể mở rộng thêm kiến thức nền, cách hiểu hoặc bối cảnh liên quan để câu trả lời hữu ích hơn.
 
 [Ràng buộc]
-- Bắt buộc 100% bằng tiếng Việt
-- Không được dùng tiếng Trung Quốc
-- Không được suy diễn rằng tài liệu có nội dung mà ngữ cảnh không cung cấp
-- Nếu không có thông tin, phải nói rõ: "Không có trong tài liệu"
-- Không lan man
-- Ưu tiên rõ ý hơn văn phong hoa mỹ
-- Nếu ngữ cảnh chỉ hỗ trợ một phần câu hỏi, phải nói rõ phần nào trả lời được, phần nào chưa đủ thông tin
+- Ưu tiên tuyệt đối thông tin có trong ngữ cảnh được cung cấp.
+- Không được bịa hoặc khẳng định điều mà ngữ cảnh không hỗ trợ.
+- Nếu ngữ cảnh không đủ để trả lời trọn vẹn, phải nói rõ phần nào có thể trả lời và phần nào chưa đủ dữ liệu.
+- Nếu thông tin không có trong tài liệu, phải nói rõ: "Không có trong tài liệu".
+- Nếu có phần mở rộng ngoài tài liệu, phải ghi rõ đó là phần giải thích thêm hoặc kiến thức nền, không phải nội dung được trích trực tiếp từ tài liệu.
+- Nếu câu hỏi liên quan đến bảng, CSV hoặc số liệu, phải bám sát hàng, cột, giá trị và điều kiện có trong ngữ cảnh.
+- Ưu tiên sự rõ ràng, chính xác và hữu ích hơn văn phong màu mè hoặc dài dòng.
 
-[Định dạng bắt buộc]
-🎯 Trả lời ngắn gọn
-- 1-2 câu trả lời trực tiếp.
-- Nếu không đủ thông tin: ghi rõ "Không có trong tài liệu" và nêu phần nào chưa có bằng chứng.
-
-🧠 Giải thích rõ hơn
-- Viết ngắn gọn, dễ hiểu, bám sát ngữ cảnh.
-- Có thể trình bày theo logic:
-  Bối cảnh -> Thông tin chính -> Cách hiểu/ý nghĩa -> Điểm còn thiếu (nếu có).
-- Có thể dùng các gạch đầu dòng ngắn nếu cần.
-
-🔥 Tóm lại 1 câu
-- Viết 1 câu chốt lại trọng tâm nhất, đúng với ngữ cảnh, không thêm chi tiết ngoài tài liệu.
-
----
 
 Câu hỏi: {user_query}
 
@@ -321,41 +300,48 @@ Ngữ cảnh:
 Trả lời:
 """
         try:
-            answer = self._generate_with_ollama(prompt)
-        except requests.RequestException as ollama_error:
+            answer = self._generate_with_lmstudio(prompt)
+        except requests.RequestException as local_error:
             if not self.api_key:
-                print(f"[Generate] Ollama error and no Google API key available: {ollama_error}")
-                return "Khong the ket noi Ollama va chua cung cap Google API Key.", citations
+                print(f"[Generate] Local LLM error and no Google API key available: {local_error}")
+                return "Khong the ket noi LM Studio va chua cung cap Google API Key.", citations
 
             try:
                 answer = self._generate_with_google(prompt)
             except requests.RequestException as google_error:
-                print(f"[Generate] Ollama error: {ollama_error}")
+                print(f"[Generate] Local LLM error: {local_error}")
                 print(f"[Generate] Google API error: {google_error}")
                 return (
-                    "Khong the ket noi Ollama. Google API loi: "
+                    "Khong the ket noi Local LLM. Google API loi: "
                     f"{self._format_request_error(google_error)}",
                     citations,
                 )
 
         return answer or "Khong co trong tai lieu.", citations
 
-    def _generate_with_ollama(self, prompt: str) -> str:
+    def _generate_with_lmstudio(self, prompt: str) -> str:
+        # Determine the endpoint based on the base_url
+        # LM Studio typically exposes /v1/chat/completions compatible with OpenAI
+        endpoint = f"{self.local_base_url}/chat/completions"
+        if not self.local_base_url.endswith("/v1"):
+            endpoint = f"{self.local_base_url}/v1/chat/completions"
+            
         response = requests.post(
-            f"{self.ollama_base_url}/api/generate",
+            endpoint,
             json={
-                "model": self.ollama_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.2,
-                },
+                "model": self.local_model,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.2,
+                "stream": False
             },
+            headers={"Content-Type": "application/json"},
             timeout=180,
         )
         response.raise_for_status()
         payload = response.json()
-        return payload.get("response", "").strip()
+        return payload.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 
     def _generate_with_google(self, prompt: str) -> str:
         self.api_key = os.getenv("GOOGLE_API_KEY", self.api_key)

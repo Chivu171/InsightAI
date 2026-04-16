@@ -23,7 +23,7 @@ const joinUrl = (baseUrl: string, path: string) => {
 };
 
 const DEFAULT_TIMEOUT_MS_REMOTE = 2500;
-const DEFAULT_TIMEOUT_MS_LOCAL = 10000;
+const DEFAULT_TIMEOUT_MS_LOCAL = 100000;
 
 const isLocalBaseUrl = (baseUrl: string) =>
   baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
