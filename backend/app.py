@@ -16,27 +16,30 @@ if "messages" not in st.session_state:
 # Sidebar
 with st.sidebar:
     st.title("⚙️ Cấu hình")
-    api_key = st.text_input("Google API Key", type="password", value=os.getenv("GOOGLE_API_KEY", ""))
-    if api_key:
-        os.environ["GOOGLE_API_KEY"] = api_key
-        # Re-init if key changed
-        if st.session_state.rag.api_key != api_key:
-             st.session_state.rag = RAGEngine()
-             st.session_state.rag.load_index()
-    
+
     st.divider()
     st.subheader("📁 Dữ liệu")
-    uploaded_file = st.file_uploader("Tải lên file PDF hoặc Text", type=["pdf", "txt"])
+    uploaded_file = st.file_uploader("Tải lên file PDF hoặc Text", type=["pdf", "txt", "csv"])
+    
+    rag_mode = st.selectbox("Chế độ xử lý", ["Hybrid (Phẳng)", "Structural (Cấu trúc)"])
     
     if st.button("Re-index Data"):
         if uploaded_file:
             with st.spinner("Đang xử lý dữ liệu..."):
-                text = st.session_state.rag.extract_text(uploaded_file)
-                if text:
+                documents = st.session_state.rag.extract_documents(uploaded_file)
+                if documents:
                     st.session_state.rag.clear_index()
-                    st.session_state.rag.build_index(text)
+                    if rag_mode == "Structural (Cấu trúc)":
+                        # Save temp file for Docling
+                        os.makedirs("uploads", exist_ok=True)
+                        temp_path = os.path.join("uploads", uploaded_file.name)
+                        with open(temp_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        st.session_state.rag.build_structure_index(temp_path)
+                    else:
+                        st.session_state.rag.build_index(documents)
                     st.session_state.rag.save_index()
-                    st.success(f"Đã index xong từ {uploaded_file.name}!")
+                    st.success(f"Đã index xong (Chế độ: {rag_mode}) từ {uploaded_file.name}!")
                 else:
                     st.error("Không thể đọc nội dung file.")
         else:
@@ -63,7 +66,10 @@ if prompt := st.chat_input("Nhập câu hỏi tại đây..."):
             st.warning("Vui lòng tải file và nhấn 'Re-index Data' ở sidebar trước.")
         else:
             with st.spinner("Đang tìm câu trả lời..."):
-                answer, sources = st.session_state.rag.query(prompt)
+                if st.session_state.rag.chunking_mode == "structure":
+                    answer, sources = st.session_state.rag.query_with_structure(prompt)
+                else:
+                    answer, sources = st.session_state.rag.query(prompt)
                 st.markdown(answer)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
 
@@ -75,8 +81,11 @@ if prompt := st.chat_input("Nhập câu hỏi tại đây..."):
                                 title = source.get("document_name", "Tài liệu không rõ tên")
                                 page = source.get("page")
                                 snippet = source.get("snippet", "")
+                                path = source.get("section_path")
                                 label = f"Nguồn {i+1}: {title}"
-                                if page:
+                                if path:
+                                    label += f" [Mục: {path}]"
+                                elif page:
                                     label += f" · Trang {page}"
                                 st.info(f"{label}\n\n{snippet}")
                             else:

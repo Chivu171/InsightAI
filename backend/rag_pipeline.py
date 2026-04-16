@@ -2,21 +2,30 @@ import os
 import pickle
 import re
 from datetime import datetime, timezone
+from typing import List, Dict, Optional
 
 import fitz
 import numpy as np
 import requests
 from dotenv import load_dotenv
+from google import genai
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
+import csv
+import io
 
-from langchain_classic.retrievers import ParentDocumentRetriever
+try:
+    from langchain_classic.retrievers import ParentDocumentRetriever
+except ImportError:
+    from langchain.retrievers import ParentDocumentRetriever
 from langchain_core.stores import InMemoryStore
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from document_structurer import DocumentStructurer
 
 
 class RAGEngine:
@@ -30,7 +39,11 @@ class RAGEngine:
 
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.client = None
-        self.gemini_model = None
+        self.google_model = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
+        self.gemini_model = self.google_model
+
+        if self.api_key:
+            self.client = genai.Client(api_key=self.api_key)
 
         self.embedding_model_name = os.getenv("EMBEDDING_MODEL", model_name)
         self.ollama_model = os.getenv("OLLAMA_MODEL", ollama_model)
@@ -50,6 +63,11 @@ class RAGEngine:
         self.bm25_corpus = []
         self.all_chunks = []
         self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+        self.structurer = DocumentStructurer()
+        self.section_vectorstore = None
+        self.section_docs = []
+        self.section_bm25 = None
 
     def clear_index(self):
         self.vectorstore = None
@@ -128,6 +146,36 @@ class RAGEngine:
 
             return page_documents
 
+        if extension == ".csv":
+            raw = real_file.read()
+            if hasattr(real_file, "seek"):
+                real_file.seek(0)
+
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            reader = csv.DictReader(io.StringIO(text))
+
+            row_documents = []
+            for row_index, row in enumerate(reader, start=1):
+                row_text = " | ".join(f"{key}: {value}" for key,     value in row.items())
+                if not row_text.strip():
+                    continue
+
+                row_documents.append(
+                    Document(
+                    page_content=row_text,
+                    metadata={
+                        "document_id": document_id,
+                        "document_name": filename,
+                        "file_type": "csv",
+                        "page": None,
+                        "row": row_index,
+                        "total_pages": None,
+                        "uploaded_at": uploaded_at,
+                    },
+                )
+            )
+
+        return row_documents
         content = real_file.read()
         text = content.decode("utf-8") if isinstance(content, bytes) else content
         text = (text or "").strip()
@@ -204,9 +252,8 @@ class RAGEngine:
         return self._attach_chunk_metadata(fixed_chunks)
 
     def _generate_answer_from_docs(self, user_query: str, docs: list[Document]):
-        limited_docs = docs[:2]
-        citations = self._build_citations(limited_docs)
-        relevant_chunks = [doc.page_content[:1200] for doc in limited_docs]
+        citations = self._build_citations(docs)
+        relevant_chunks = [doc.page_content for doc in docs]
 
         if not relevant_chunks:
             return "Khong co trong tai lieu.", citations
@@ -214,41 +261,55 @@ class RAGEngine:
         context = "\n---\n".join(relevant_chunks)
         prompt = f"""
 [Vai trò]
-Bạn là chuyên gia đọc hiểu và phân tích bài báo khoa học (AI/ML).
+Bạn là trợ lý AI hỗ trợ người dùng đọc hiểu, phân tích và tra cứu thông tin từ tài liệu.
+
+[Mục tiêu]
+Giúp người dùng:
+- nhanh chóng hiểu ý chính của tài liệu
+- xác định thông tin có thực sự nằm trong tài liệu hay không
+- phân biệt giữa nội dung được nêu rõ trong ngữ cảnh và nội dung chưa có đủ bằng chứng
+- tiếp tục đào sâu bằng các câu hỏi liên quan
 
 [Bối cảnh]
-Bạn đang trả lời câu hỏi dựa trên ngữ cảnh được truy xuất từ bài báo (RAG).
-Ngữ cảnh có thể không đầy đủ, vì vậy bạn chỉ được phép sử dụng thông tin có trong ngữ cảnh.
+Bạn đang trả lời dựa trên ngữ cảnh được truy xuất từ tài liệu bằng hệ thống RAG.
+Tài liệu có thể là PDF, TXT, CSV hoặc dữ liệu văn bản/bảng biểu tương tự.
+Ngữ cảnh có thể không đầy đủ. Vì vậy:
+- ưu tiên tuyệt đối thông tin có trong ngữ cảnh
+- không được khẳng định điều gì nếu ngữ cảnh không hỗ trợ
+- nếu thông tin không có trong ngữ cảnh, phải nói rõ: "Không có trong tài liệu"
 
 [Nhiệm vụ]
-Trả lời câu hỏi theo 3 phần:
+Hãy trả lời bằng tiếng Việt, ngắn gọn, rõ ràng, đúng cấu trúc dưới đây.
+Nếu ngữ cảnh không đủ để trả lời, phải nói rõ "Không có trong tài liệu" và chỉ mô tả những gì ngữ cảnh đang cho thấy.
 
-1. **Answer (Câu trả lời chính)**:
-   - Ngắn gọn, trực tiếp (1-2 câu)
-   - Nếu hỏi "method chính" thì chỉ chọn 1 method quan trọng nhất
-
-2. **Explanation (Giải thích)**:
-   - Giải thích vì sao câu trả lời đúng
-   - Tổng hợp thông tin từ các đoạn liên quan trong ngữ cảnh
-   - Có thể nhắc đến các thành phần, công thức, hoặc cơ chế liên quan
-
-3. **Related Knowledge (Kiến thức liên quan)**:
-   - Chỉ bổ sung nếu trong ngữ cảnh có đề cập
-   - Ví dụ: phương pháp cải tiến, biến thể, hoặc kỹ thuật liên quan
-   - Không được thêm kiến thức bên ngoài
+[Cách xử lý theo loại dữ liệu]
+- Nếu ngữ cảnh là đoạn văn bản: tóm tắt và giải thích bám sát nội dung được cung cấp.
+- Nếu ngữ cảnh là dữ liệu bảng hoặc CSV: ưu tiên đọc theo cột, hàng, giá trị, xu hướng, điều kiện so sánh hoặc các trường liên quan trong ngữ cảnh.
+- Không được tự suy ra các cột, hàng, ý nghĩa hoặc kết luận nếu ngữ cảnh không thể hiện rõ.
+- Nếu câu hỏi yêu cầu tính toán, so sánh hoặc thống kê nhưng ngữ cảnh không đủ dữ liệu, phải nói rõ phần thiếu.
 
 [Ràng buộc]
-- CHỈ sử dụng thông tin từ ngữ cảnh
-- Bắt buộc trả lời 100 phần trăm bằng tiếng Việt có dấu
-- KHÔNG được dùng tiếng Trung Quốc
-- KHÔNG suy diễn ngoài
-- Nếu không có thông tin thì trả lời: "Không có trong tài liệu"
+- Bắt buộc 100% bằng tiếng Việt
+- Không được dùng tiếng Trung Quốc
+- Không được suy diễn rằng tài liệu có nội dung mà ngữ cảnh không cung cấp
+- Nếu không có thông tin, phải nói rõ: "Không có trong tài liệu"
 - Không lan man
+- Ưu tiên rõ ý hơn văn phong hoa mỹ
+- Nếu ngữ cảnh chỉ hỗ trợ một phần câu hỏi, phải nói rõ phần nào trả lời được, phần nào chưa đủ thông tin
 
-[Định dạng]
-**Answer:** ...
-**Explanation:** ...
-**Related Knowledge:** ... (có thể bỏ nếu không có)
+[Định dạng bắt buộc]
+🎯 Trả lời ngắn gọn
+- 1-2 câu trả lời trực tiếp.
+- Nếu không đủ thông tin: ghi rõ "Không có trong tài liệu" và nêu phần nào chưa có bằng chứng.
+
+🧠 Giải thích rõ hơn
+- Viết ngắn gọn, dễ hiểu, bám sát ngữ cảnh.
+- Có thể trình bày theo logic:
+  Bối cảnh -> Thông tin chính -> Cách hiểu/ý nghĩa -> Điểm còn thiếu (nếu có).
+- Có thể dùng các gạch đầu dòng ngắn nếu cần.
+
+🔥 Tóm lại 1 câu
+- Viết 1 câu chốt lại trọng tâm nhất, đúng với ngữ cảnh, không thêm chi tiết ngoài tài liệu.
 
 ---
 
@@ -259,6 +320,27 @@ Ngữ cảnh:
 
 Trả lời:
 """
+        try:
+            answer = self._generate_with_ollama(prompt)
+        except requests.RequestException as ollama_error:
+            if not self.api_key:
+                print(f"[Generate] Ollama error and no Google API key available: {ollama_error}")
+                return "Khong the ket noi Ollama va chua cung cap Google API Key.", citations
+
+            try:
+                answer = self._generate_with_google(prompt)
+            except requests.RequestException as google_error:
+                print(f"[Generate] Ollama error: {ollama_error}")
+                print(f"[Generate] Google API error: {google_error}")
+                return (
+                    "Khong the ket noi Ollama. Google API loi: "
+                    f"{self._format_request_error(google_error)}",
+                    citations,
+                )
+
+        return answer or "Khong co trong tai lieu.", citations
+
+    def _generate_with_ollama(self, prompt: str) -> str:
         response = requests.post(
             f"{self.ollama_base_url}/api/generate",
             json={
@@ -267,16 +349,57 @@ Trả lời:
                 "stream": False,
                 "options": {
                     "temperature": 0.2,
-                    "num_ctx": 2048,
-                    "num_predict": 256,
                 },
             },
             timeout=180,
         )
         response.raise_for_status()
         payload = response.json()
-        answer = payload.get("response", "").strip()
-        return answer or "Khong co trong tai lieu.", citations
+        return payload.get("response", "").strip()
+
+    def _generate_with_google(self, prompt: str) -> str:
+        self.api_key = os.getenv("GOOGLE_API_KEY", self.api_key)
+        response = requests.post(
+            (
+                "https://generativelanguage.googleapis.com/v1/models/"
+                f"{self.google_model}:generateContent?key={self.api_key}"
+            ),
+            json={
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": prompt,
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.2,
+                },
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        candidates = payload.get("candidates", [])
+        if not candidates:
+            return ""
+
+        content = candidates[0].get("content", {})
+        parts = content.get("parts", [])
+        texts = [part.get("text", "") for part in parts if part.get("text")]
+        return "\n".join(texts).strip()
+
+    @staticmethod
+    def _format_request_error(error: requests.RequestException) -> str:
+        response = getattr(error, "response", None)
+        if response is not None:
+            body = response.text.strip().replace("\n", " ")
+            if len(body) > 300:
+                body = body[:300] + "..."
+            return f"HTTP {response.status_code} - {body or response.reason}"
+        return str(error)
 
     def build_index(self, text_or_docs):
         self.status = "processing"
@@ -315,6 +438,136 @@ Trả lời:
         self.status = "done"
         print(f"[Hybrid] Built BM25 index with {len(self.all_chunks)} chunks")
         return self.vectorstore, parent_docs
+
+    def build_structure_index(self, file_path: str):
+        self.status = "processing"
+        self.progress = 10
+        
+        # 1. Structural Parsing
+        raw_sections = self.structurer.process_file(file_path)
+        self.progress = 30
+        
+        if not raw_sections:
+            raise ValueError("No sections found in the document.")
+
+        # 2. Section Summarization (Enrichment)
+        print(f"[Structure] Summarizing {len(raw_sections)} sections for better routing...")
+        enriched_sections = []
+        for i, sec in enumerate(raw_sections):
+            summary = self._summarize_section(sec.page_content)
+            sec.metadata["section_summary"] = summary
+            # We index a combination of title and summary for the router
+            routing_text = f"Title: {sec.metadata['section_title']}\nSummary: {summary}"
+            enriched_sections.append(Document(page_content=routing_text, metadata=sec.metadata))
+            self.progress = 30 + int((i / len(raw_sections)) * 30)
+        
+        self.section_docs = enriched_sections
+        self.progress = 60
+
+        # 3. Build Section Index (Router - Hybrid)
+        print(f"[Structure] Building hybrid section index...")
+        self.section_vectorstore = FAISS.from_documents(self.section_docs, self.embeddings)
+        section_tokenized = [self._tokenize(doc.page_content) for doc in self.section_docs]
+        self.section_bm25 = BM25Okapi(section_tokenized)
+        
+        # 4. Build Content Index (Chunks)
+        self.progress = 70
+        all_child_chunks = []
+        for sec_doc in raw_sections:
+            chunks = self.child_splitter.split_documents([sec_doc])
+            all_child_chunks.extend(chunks)
+        
+        self.progress = 90
+        self.vectorstore = FAISS.from_documents(all_child_chunks, self.embeddings)
+        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 15})
+        
+        # 5. Global BM25 for chunks
+        self.all_chunks = all_child_chunks
+        self.bm25_corpus = [self._tokenize(doc.page_content) for doc in self.all_chunks]
+        self.bm25_index = BM25Okapi(self.bm25_corpus)
+        
+        self.chunking_mode = "structure"
+        self.progress = 100
+        self.status = "done"
+        print(f"[Structure] Built enhanced hierarchical index with {len(all_child_chunks)} chunks and {len(self.section_docs)} summaries")
+        return self.vectorstore, self.section_vectorstore
+
+    def _summarize_section(self, text: str) -> str:
+        """Uses LLM to generate a 1-sentence summary of the section for routing."""
+        prompt = f"Summarize the following document section in ONE concise sentence for search indexing purposes. Focus on the core topics discussed:\n\n{text[:3000]}"
+        try:
+            # Try Gemini first
+            if self.api_key:
+                summary = self._generate_with_google(prompt)
+                if summary: return summary
+            # Fallback to a truncation of the text
+            return text[:200].replace("\n", " ") + "..."
+        except:
+            return text[:200].replace("\n", " ") + "..."
+
+    def _route_query(self, query: str, k: int = 4) -> List[str]:
+        """
+        Routes the query using Hybrid search (Dense + BM25) on section summaries.
+        """
+        if not self.section_vectorstore or not self.section_bm25:
+            return []
+        
+        # Dense
+        dense_results = self.section_vectorstore.similarity_search(query, k=k)
+        
+        # BM25
+        query_tokens = self._tokenize(query)
+        bm25_scores = self.section_bm25.get_scores(query_tokens)
+        top_bm25_indices = np.argsort(bm25_scores)[::-1][:k]
+        bm25_results = [self.section_docs[i] for i in top_bm25_indices if bm25_scores[i] > 0]
+        
+        # Combine
+        combined = dense_results + bm25_results
+        paths = [doc.metadata.get("section_path") for doc in combined]
+        return list(set(paths))
+
+    def query_with_structure(self, user_query: str, k: int = 5):
+        """
+        Structure-aware query: Route -> Soft Filtering (Boost) -> Generate.
+        """
+        if self.section_vectorstore is None:
+            return self.query(user_query, k=k)
+
+        # 1. Hybrid Routing (Find top 4 sections)
+        relevant_paths = self._route_query(user_query, k=4)
+        print(f"[Structure] Routing query to: {relevant_paths}")
+        
+        # 2. Global Hybrid Retrieval (Get 20 candidates)
+        bm25_results = self._bm25_retrieve(user_query, k=20)
+        dense_results = self._dense_retrieve(user_query, k=20)
+        
+        # 3. Soft Filtering (Scoring Boost)
+        # We manually score chunks: Base Score (Rank) + Boost (if in relevant section)
+        # Deduplicate manually as Document is unhashable
+        seen_content = set()
+        candidates = []
+        for doc in bm25_results + dense_results:
+            if doc.page_content not in seen_content:
+                seen_content.add(doc.page_content)
+                candidates.append(doc)
+
+        scored_candidates = []
+        
+        for doc in candidates:
+            score = 0.0
+            # Boost if the chunk belongs to a routed section
+            if doc.metadata.get("section_path") in relevant_paths:
+                score += 1.0
+            
+            # Additional boost if it's a high-level section match
+            scored_candidates.append((score, doc))
+        
+        # Sort by boost score, then fall back to original similarity (dense_results order)
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        final_results = [doc for score, doc in scored_candidates[:k]]
+
+        # 4. Generate Answer
+        return self._generate_answer_from_docs(user_query, final_results)
 
     def build_fixed_chunk_index(self, text_or_docs, chunk_size=800, overlap=250):
         self.status = "processing"
@@ -360,17 +613,38 @@ Trả lời:
                 },
                 f,
             )
+        
+        # Save section-related data if in structure mode
+        if self.section_vectorstore:
+            section_path = os.path.join(folder_path, "sections")
+            os.makedirs(section_path, exist_ok=True)
+            self.section_vectorstore.save_local(section_path)
+            with open(os.path.join(section_path, "section_data.pkl"), "wb") as f:
+                pickle.dump({
+                    "section_docs": self.section_docs,
+                    "section_bm25": self.section_bm25
+                }, f)
+        
+        # Save config
+        with open(os.path.join(folder_path, "config.pkl"), "wb") as f:
+            pickle.dump({"chunking_mode": self.chunking_mode}, f)
+            
         return True
 
     def load_index(self, folder_path="vector_db"):
         if not os.path.exists(os.path.join(folder_path, "index.faiss")):
             return False
 
-        self.vectorstore = FAISS.load_local(
-            folder_path,
-            self.embeddings,
-            allow_dangerous_deserialization=True,
-        )
+        try:
+            self.vectorstore = FAISS.load_local(
+                folder_path,
+                self.embeddings,
+                allow_dangerous_deserialization=True,
+            )
+        except Exception as e:
+            print(f"[Load] FAISS load error: {e}")
+            return False
+
         docstore_path = os.path.join(folder_path, "docstore.pkl")
         if os.path.exists(docstore_path):
             with open(docstore_path, "rb") as f:
@@ -390,9 +664,31 @@ Trả lời:
             self.all_chunks = data["all_chunks"]
             self.bm25_corpus = data["bm25_corpus"]
             self.bm25_index = BM25Okapi(self.bm25_corpus)
-            print(f"[Hybrid] Loaded BM25 index with {len(self.all_chunks)} chunks")
 
-        self.chunking_mode = "semantic"
+        # Load section-related data if exists
+        section_path = os.path.join(folder_path, "sections")
+        if os.path.exists(os.path.join(section_path, "index.faiss")):
+            self.section_vectorstore = FAISS.load_local(
+                section_path,
+                self.embeddings,
+                allow_dangerous_deserialization=True
+            )
+            with open(os.path.join(section_path, "section_data.pkl"), "rb") as f:
+                sec_data = pickle.load(f)
+                self.section_docs = sec_data["section_docs"]
+                self.section_bm25 = sec_data["section_bm25"]
+            print(f"[Load] Section indexes restored.")
+
+        # Load config
+        config_path = os.path.join(folder_path, "config.pkl")
+        if os.path.exists(config_path):
+            with open(config_path, "rb") as f:
+                config = pickle.load(f)
+                self.chunking_mode = config.get("chunking_mode", "semantic")
+        else:
+            self.chunking_mode = "semantic"
+            
+        print(f"[Load] Index loaded with mode: {self.chunking_mode}")
         return True
 
     def _bm25_retrieve(self, query: str, k: int = 10) -> list[Document]:
@@ -462,6 +758,8 @@ Trả lời:
                     "chunk_index": metadata.get("chunk_index"),
                     "file_type": metadata.get("file_type"),
                     "uploaded_at": metadata.get("uploaded_at"),
+                    "section_path": metadata.get("section_path"),
+                    "section_title": metadata.get("section_title"),
                     "snippet": snippet[:320],
                 }
             )
@@ -475,10 +773,6 @@ Trả lời:
         dense_results = self._dense_retrieve(user_query, k=k * 5)
         fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
         reranked_results = self._rerank(user_query, fused_results, top_k=k)
-
-        if not reranked_results:
-            return self._generate_answer_from_docs(user_query, [])
-
         return self._generate_answer_from_docs(user_query, reranked_results)
 
     def query_fixed_chunking(self, user_query, k=3):
