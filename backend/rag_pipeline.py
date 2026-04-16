@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from google import genai
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
+import csv
+import io
 
 try:
     from langchain_classic.retrievers import ParentDocumentRetriever
@@ -144,6 +146,36 @@ class RAGEngine:
 
             return page_documents
 
+        if extension == ".csv":
+            raw = real_file.read()
+            if hasattr(real_file, "seek"):
+                real_file.seek(0)
+
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            reader = csv.DictReader(io.StringIO(text))
+
+            row_documents = []
+            for row_index, row in enumerate(reader, start=1):
+                row_text = " | ".join(f"{key}: {value}" for key,     value in row.items())
+                if not row_text.strip():
+                    continue
+
+                row_documents.append(
+                    Document(
+                    page_content=row_text,
+                    metadata={
+                        "document_id": document_id,
+                        "document_name": filename,
+                        "file_type": "csv",
+                        "page": None,
+                        "row": row_index,
+                        "total_pages": None,
+                        "uploaded_at": uploaded_at,
+                    },
+                )
+            )
+
+        return row_documents
         content = real_file.read()
         text = content.decode("utf-8") if isinstance(content, bytes) else content
         text = (text or "").strip()
@@ -229,17 +261,18 @@ class RAGEngine:
         context = "\n---\n".join(relevant_chunks)
         prompt = f"""
 [Vai trò]
-Bạn là trợ lý AI hỗ trợ sinh viên đọc hiểu và phân tích bài báo khoa học trong lĩnh vực AI/ML.
+Bạn là trợ lý AI hỗ trợ người dùng đọc hiểu, phân tích và tra cứu thông tin từ tài liệu.
 
 [Mục tiêu]
-Giúp sinh viên:
-- nhanh chóng hiểu ý chính của bài báo
-- xác định thông tin có thực sự nằm trong tài liệu
-- phân biệt giữa nội dung được nêu rõ trong ngữ cảnh và nội dung chỉ là suy luận
+Giúp người dùng:
+- nhanh chóng hiểu ý chính của tài liệu
+- xác định thông tin có thực sự nằm trong tài liệu hay không
+- phân biệt giữa nội dung được nêu rõ trong ngữ cảnh và nội dung chưa có đủ bằng chứng
 - tiếp tục đào sâu bằng các câu hỏi liên quan
 
 [Bối cảnh]
-Bạn đang trả lời dựa trên ngữ cảnh được truy xuất từ bài báo bằng hệ thống RAG.
+Bạn đang trả lời dựa trên ngữ cảnh được truy xuất từ tài liệu bằng hệ thống RAG.
+Tài liệu có thể là PDF, TXT, CSV hoặc dữ liệu văn bản/bảng biểu tương tự.
 Ngữ cảnh có thể không đầy đủ. Vì vậy:
 - ưu tiên tuyệt đối thông tin có trong ngữ cảnh
 - không được khẳng định điều gì nếu ngữ cảnh không hỗ trợ
@@ -247,12 +280,18 @@ Ngữ cảnh có thể không đầy đủ. Vì vậy:
 
 [Nhiệm vụ]
 Hãy trả lời bằng tiếng Việt, ngắn gọn, rõ ràng, đúng cấu trúc dưới đây.
-Nếu ngữ cảnh không đủ để trả lời, phải nói rõ "Không có trong tài liệu" và chỉ mô tả những gì ngữ cảnh đang cho thấy (không bịa).
+Nếu ngữ cảnh không đủ để trả lời, phải nói rõ "Không có trong tài liệu" và chỉ mô tả những gì ngữ cảnh đang cho thấy.
+
+[Cách xử lý theo loại dữ liệu]
+- Nếu ngữ cảnh là đoạn văn bản: tóm tắt và giải thích bám sát nội dung được cung cấp.
+- Nếu ngữ cảnh là dữ liệu bảng hoặc CSV: ưu tiên đọc theo cột, hàng, giá trị, xu hướng, điều kiện so sánh hoặc các trường liên quan trong ngữ cảnh.
+- Không được tự suy ra các cột, hàng, ý nghĩa hoặc kết luận nếu ngữ cảnh không thể hiện rõ.
+- Nếu câu hỏi yêu cầu tính toán, so sánh hoặc thống kê nhưng ngữ cảnh không đủ dữ liệu, phải nói rõ phần thiếu.
 
 [Ràng buộc]
 - Bắt buộc 100% bằng tiếng Việt
 - Không được dùng tiếng Trung Quốc
-- Không được suy diễn rằng bài báo có nội dung mà ngữ cảnh không cung cấp
+- Không được suy diễn rằng tài liệu có nội dung mà ngữ cảnh không cung cấp
 - Nếu không có thông tin, phải nói rõ: "Không có trong tài liệu"
 - Không lan man
 - Ưu tiên rõ ý hơn văn phong hoa mỹ
@@ -263,13 +302,14 @@ Nếu ngữ cảnh không đủ để trả lời, phải nói rõ "Không có t
 - 1-2 câu trả lời trực tiếp.
 - Nếu không đủ thông tin: ghi rõ "Không có trong tài liệu" và nêu phần nào chưa có bằng chứng.
 
-🧠 Giải thích rõ hơn (hiểu bản chất)
-- Viết như đang giảng cho sinh viên: bám ngữ cảnh, không bịa.
-- Ưu tiên trả lời theo logic: Bối cảnh → Vấn đề → Ý tưởng/cách làm → Vì sao hợp lý → Hạn chế/khó khăn (nếu ngữ cảnh có).
-- Có thể trình bày theo các gạch đầu dòng ngắn.
+🧠 Giải thích rõ hơn
+- Viết ngắn gọn, dễ hiểu, bám sát ngữ cảnh.
+- Có thể trình bày theo logic:
+  Bối cảnh -> Thông tin chính -> Cách hiểu/ý nghĩa -> Điểm còn thiếu (nếu có).
+- Có thể dùng các gạch đầu dòng ngắn nếu cần.
 
-🔥 Tóm lại 1 câu (chuẩn thi / báo cáo)
-- Viết 1 câu chốt lại trọng tâm nhất, đúng với ngữ cảnh (không thêm chi tiết ngoài tài liệu).
+🔥 Tóm lại 1 câu
+- Viết 1 câu chốt lại trọng tâm nhất, đúng với ngữ cảnh, không thêm chi tiết ngoài tài liệu.
 
 ---
 

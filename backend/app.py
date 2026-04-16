@@ -19,7 +19,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📁 Dữ liệu")
-    uploaded_file = st.file_uploader("Tải lên file PDF hoặc Text", type=["pdf", "txt"])
+    uploaded_file = st.file_uploader("Tải lên file PDF hoặc Text", type=["pdf", "txt", "csv"])
     
     rag_mode = st.selectbox("Chế độ xử lý", ["Hybrid (Phẳng)", "Structural (Cấu trúc)"])
     
