@@ -65,7 +65,7 @@ graph TD
     subgraph "Summary Path: Context Search"
         SUM_PATH --> BLOCKS[Block Similarity Search]
         BLOCKS --> MMR[MMR Diversity Selection]
-        MMR --> TRANN[TextRank Feature Extraction]
+        MMR --> TRANN[TextRank + MMR Sentence Selection]
     end
 
     subgraph "Response Generation"
