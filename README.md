@@ -1,80 +1,137 @@
-# InsightAI
+# InsightAI 🤖 — Advanced RAG Chatbot
 
-InsightAI is a full-stack RAG chatbot for asking questions over uploaded documents. It includes a FastAPI backend, a React frontend, and a hybrid retrieval pipeline using BM25 + dense FAISS.
+InsightAI is a professional-grade full-stack chatbot that enables deep document analysis. It combines a high-performance **FastAPI** backend with a modern **React/TypeScript** frontend, featuring a hybrid RAG pipeline designed for both factual retrieval and multi-document summarization.
 
-## What it supports
+---
 
-- Upload PDF, TXT, CSV, DOCX, and image files
-- Background indexing with progress updates
-- Question answering with citations
-- Session-based chat history per backend process
-- Local-first LLM support with optional Gemini fallback
+## 🛠 Tech Stack
 
-## Run with Docker
+### **Frontend**
+- **React 18 & TypeScript**: For a type-safe, component-based UI.
+- **Vite**: Ultra-fast build tool and dev server.
+- **Tailwind CSS**: For a sleek, responsive dark-mode interface.
+- **Markdown & KaTeX**: Properly renders AI responses with lists, code blocks, and math.
 
-### Prerequisites
+### **Backend**
+- **Python 3.9+ & FastAPI**: Asynchronous REST API for high performance.
+- **PyMuPDF (fitz)**: High-speed PDF text and structure extraction.
+- **docx2txt & CSV**: Support for Office and data documents.
+- **Docker & Docker Compose**: For seamless, containerized deployment.
 
-- Docker Desktop or Docker Engine with Compose support
-- A `backend/.env` file for LLM configuration
+### **AI & RAG Engine**
+- **Embeddings**: `BAAI/bge-small-en-v1.5` (via HuggingFace) for high-quality semantic vectors.
+- **Vector Store**: **FAISS** (Facebook AI Similarity Search) for dense retrieval.
+- **Keyword Search**: **BM25 (Rank-BM25)** for precise term matching.
+- **Reranker**: **Cross-Encoder** (`ms-marco-MiniLM`) for scoring candidates after retrieval.
+- **LLM Support**: 
+  - **Local-first**: Integration with **LM Studio** (OpenAI-compatible endpoint).
+  - **Fallback**: **Google Gemini API** support.
 
-### 1) Configure backend env
+---
 
+## 🏗 Architecture & Workflow
+
+InsightAI follows a sophisticated retrieval-augmented generation (RAG) pattern, optimized for both precision and broad context understanding.
+
+```mermaid
+graph TD
+    subgraph "Data Ingestion & Processing"
+        A[User Uploads: PDF, DOCX, CSV, TXT] --> B[Text Extraction: PyMuPDF/docx2txt]
+        B --> C{Chunking Strategy}
+        C -->|Semantic| D[Semantic Chunks]
+        D --> E[Hybrid Indexing]
+        E --> F[FAISS Vector Store - Dense]
+        E --> G[BM25 Index - Keyword]
+        D --> H[Sliding Window Blocks - Summary]
+    end
+
+    subgraph "Query Pipeline (Context-Aware)"
+        I[User Query] --> J[Session History Retrieval]
+        J --> K[LLM Query Rewriter]
+        K --> L{Intent Classification}
+        L -->|Fact| M[Fact Pipeline: Hybrid Search]
+        L -->|Summary| N[Summary Pipeline: Block Retrieval]
+    end
+
+    subgraph "Reranking & Selection"
+        M --> O[RRF Fusion]
+        O --> P[Cross-Encoder Reranker]
+        N --> Q[MMR Diversity Selection]
+        Q --> R[TextRank Sentence Extraction]
+    end
+
+    subgraph "Response Generation"
+        P --> S[Context Construction]
+        R --> S
+        S --> T[LLM: LM Studio / Gemini]
+        T --> U[Final Answer with Citations]
+    end
+
+    U --> UI[React Frontend Dashboard]
+```
+
+---
+
+## 🧠 Advanced Engineering Decisions
+
+To stand out, this project implements several advanced information retrieval techniques:
+
+1.  **Hybrid Search (BM25 + Dense)**: Combines keyword-based matching with semantic understanding to solve the "vocabulary mismatch" problem.
+2.  **RRF Fusion & Reranking**: Uses Reciprocal Rank Fusion to merge search results and a secondary Reranker to ensure the Top-K chunks are the most relevant.
+3.  **Dynamic Query Classification**: The system detects if a user wants a **Fact** (specific answer) or a **Summary** (overview), routing the request through specialized pipelines.
+4.  **MMR (Maximal Marginal Relevance)**: For summary queries, the system uses MMR to select chunks that are relevant *but diverse*, avoiding redundant info in the final context.
+5.  **TextRank-based Summarization**: Uses a sentence-level Graph algorithm (PageRank style) to extract core sentences before generating the final answer.
+6.  **Conversation Memory**: Implements **Query Rewriting** using session history, allowing the AI to understand pronouns (e.g., "What about its first chapter?") by looking at previous exchanges.
+
+---
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+- Python 3.9+ & Node.js 18+
+- (Optional) [LM Studio](https://lmstudio.ai/) running a local model.
+
+### 2. Setup Environment
 Create `backend/.env`:
-
 ```env
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=your-local-model-name
-
-# Optional fallback
-# GOOGLE_API_KEY=your_google_api_key
-# GOOGLE_MODEL=gemini-2.5-flash
+# GOOGLE_API_KEY=...
 ```
 
-If you use Google Gemini, make sure `GOOGLE_API_KEY` is set. If you use a local model through LM Studio, make sure the LM Studio server is running before starting the stack.
-
-### 2) Build and start
-
+### 3. Run with Docker (Recommended)
 ```bash
 docker compose up --build
 ```
+Access at: Frontend [http://localhost:5173](http://localhost:5173) | Backend [http://localhost:8000](http://localhost:8000)
 
-### 3) Open the app
+---
 
-- Frontend: [http://localhost:5173](http://localhost:5173)
-- Backend API: [http://localhost:8000](http://localhost:8000)
+## 💾 Manual Installation (Alternative)
 
-## Useful endpoints
+If you prefer running without Docker:
 
-- `POST /upload` - upload a file and build the index
-- `GET /progress` - indexing progress
-- `POST /queryHybrid` - ask a question
-- `POST /reset` - clear the index
-- `GET /status` - backend status
-
-## Docker layout
-
-- `backend` runs `uvicorn main:app --host 0.0.0.0 --port 8000`
-- `frontend` runs the Vite dev server on `0.0.0.0:5173`
-- Both services use bind mounts for local development
-
-## Notes
-
-- The backend image is built from `backend/Dockerfile`
-- The frontend image is built from `frontend/Dockerfile`
-- `.dockerignore` files are included to keep secrets, caches, and build artifacts out of the images
-
-## Troubleshooting
-
-If the app starts but queries fail, check:
-
-1. `backend/.env` is present and valid
-2. LM Studio or Gemini is reachable
-3. The backend container logs for indexing or model errors
-
-If Docker build fails, try:
-
+### **Backend**
 ```bash
-docker compose build --no-cache
-docker compose logs -f backend
-docker compose logs -f frontend
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\\Scripts\\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 ```
+
+### **Frontend**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+---
+
+## 📈 Future Improvements
+- **Streaming SSR**: Implement Server-Sent Events (SSE) for token-by-token streaming.
+- **Persistence**: Add PostgreSQL/vector-native database (milvus/weaviate) for long-term storage.
+- **Evaluation**: Implement a RAGAS framework for automated retrieval quality testing.
+
+---
