@@ -27,6 +27,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 class QueryRequest(BaseModel):
     query: str
+    session_id: str = None
 
 
 def get_engine(mode: str) -> RAGEngine:
@@ -142,7 +143,7 @@ async def reset_mode(mode: str):
 @app.post("/queryHybrid")
 async def query_hybrid(request: QueryRequest):
     try:
-        answer, sources = rag_hybrid.query(request.query)
+        answer, sources = rag_hybrid.query(request.query, session_id=request.session_id)
         return {
             "answer": answer,
             "sources": sources,
@@ -154,7 +155,7 @@ async def query_hybrid(request: QueryRequest):
 @app.post("/debug/queryHybrid")
 async def debug_query_hybrid(request: QueryRequest):
     try:
-        result = rag_hybrid.debug_query(request.query)
+        result = rag_hybrid.debug_query(request.query, session_id=request.session_id)
         return {
             "mode": "hybrid",
             **result,

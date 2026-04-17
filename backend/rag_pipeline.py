@@ -6,6 +6,8 @@ from typing import List, Dict, Optional
 
 import fitz
 import numpy as np
+import csv
+import docx2txt
 import requests
 from dotenv import load_dotenv
 from google import genai
@@ -60,6 +62,7 @@ class RAGEngine:
         self.chunking_mode = None
         self.status = "idle"
         self.progress = 0
+        self.conversations = {}
 
         self.bm25_index = None
         self.bm25_corpus = []
@@ -84,117 +87,85 @@ class RAGEngine:
     def _tokenize(text: str) -> list[str]:
         return re.findall(r"\w+", text.lower())
 
-    def extract_text(self, file_obj):
-        filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", "")
-        real_file = getattr(file_obj, "file", file_obj)
-
-        if str(filename).lower().endswith(".pdf"):
-            if hasattr(real_file, "seek"):
-                real_file.seek(0)
-            pdf_bytes = real_file.read()
-            if hasattr(real_file, "seek"):
-                real_file.seek(0)
-
-            with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf_document:
-                pages = []
-                for page in pdf_document:
-                    page_text = page.get_text("text").strip()
-                    if page_text:
-                        pages.append(page_text)
-                return "\n".join(pages)
-
-        content = real_file.read()
-        return content.decode("utf-8") if isinstance(content, bytes) else content
+    def extract_text(self, file_path: str) -> str:
+        """Helper to extract raw text from various file formats."""
+        extension = os.path.splitext(file_path)[1].lower()
+        
+        # 1. Handle PDF
+        if extension == ".pdf":
+            try:
+                doc = fitz.open(file_path)
+                text_content = ""
+                for page in doc:
+                    text_content += page.get_text() + "\n"
+                doc.close()
+                return text_content
+            except Exception as e:
+                print(f"Error parsing PDF: {e}")
+                return ""
+                
+        # 2. Handle CSV
+        elif extension == ".csv":
+            try:
+                text_rows = []
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        # Join columns with a pipe to preserve row context
+                        text_rows.append(" | ".join(row))
+                return "\n".join(text_rows)
+            except Exception as e:
+                print(f"Error parsing CSV: {e}")
+                return ""
+                
+        # 3. Handle Word (.docx)
+        elif extension == ".docx":
+            try:
+                return docx2txt.process(file_path)
+            except Exception as e:
+                print(f"Error parsing Word file: {e}")
+                return ""
+                
+        # 4. Default/Fallback (txt, md, etc.)
+        else:
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    return f.read()
+            except Exception as e:
+                print(f"Error parsing text file: {e}")
+                return ""
 
     def extract_documents(self, file_obj) -> list[Document]:
-        filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", "uploaded_file")
-        real_file = getattr(file_obj, "file", file_obj)
-        document_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", os.path.splitext(filename)[0]).strip("_") or "uploaded_file"
-        uploaded_at = datetime.now(timezone.utc).isoformat()
-        extension = os.path.splitext(filename)[1].lower()
-
-        if hasattr(real_file, "seek"):
-            real_file.seek(0)
-
-        if extension == ".pdf":
-            pdf_bytes = real_file.read()
-            if hasattr(real_file, "seek"):
-                real_file.seek(0)
-
-            page_documents: list[Document] = []
-            with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf_document:
-                total_pages = len(pdf_document)
-
-                for page_index, page in enumerate(pdf_document, start=1):
-                    page_text = page.get_text("text").strip()
-                    if not page_text:
-                        continue
-
-                    page_documents.append(
-                        Document(
-                            page_content=page_text,
-                            metadata={
-                                "document_id": document_id,
-                                "document_name": filename,
-                                "file_type": extension or "pdf",
-                                "page": page_index,
-                                "total_pages": total_pages,
-                                "uploaded_at": uploaded_at,
-                            },
-                        )
-                    )
-
-            return page_documents
-
-        if extension == ".csv":
-            raw = real_file.read()
-            if hasattr(real_file, "seek"):
-                real_file.seek(0)
-
-            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-            reader = csv.DictReader(io.StringIO(text))
-
-            row_documents = []
-            for row_index, row in enumerate(reader, start=1):
-                row_text = " | ".join(f"{key}: {value}" for key,     value in row.items())
-                if not row_text.strip():
-                    continue
-
-                row_documents.append(
-                    Document(
-                    page_content=row_text,
-                    metadata={
-                        "document_id": document_id,
-                        "document_name": filename,
-                        "file_type": "csv",
-                        "page": None,
-                        "row": row_index,
-                        "total_pages": None,
-                        "uploaded_at": uploaded_at,
-                    },
-                )
-            )
-
-        return row_documents
-        content = real_file.read()
-        text = content.decode("utf-8") if isinstance(content, bytes) else content
-        text = (text or "").strip()
-        if not text:
+        """Entry point for FastAPI UploadFile. Saves temp, extracts text, and wraps in Documents."""
+        filename = getattr(file_obj, "filename", "unknown_file")
+        os.makedirs("uploads", exist_ok=True)
+        temp_path = os.path.join("uploads", filename)
+        
+        # Save UploadFile to disk
+        try:
+            # We need to read from the start
+            file_obj.file.seek(0)
+            with open(temp_path, "wb") as f:
+                f.write(file_obj.file.read())
+        except Exception as e:
+            print(f"Error saving file: {e}")
             return []
-
-        return [
-            Document(
-                page_content=text,
-                metadata={
-                    "document_id": document_id,
-                    "document_name": filename,
-                    "file_type": extension or "text",
-                    "page": None,
-                    "total_pages": None,
-                    "uploaded_at": uploaded_at,
-                },
-            )
-        ]
+            
+        full_text = self.extract_text(temp_path)
+        if not full_text.strip():
+            return []
+            
+        # Wrap as a single document with metadata
+        # (Later chunking logic will split this)
+        doc = Document(
+            page_content=full_text,
+            metadata={
+                "document_name": filename,
+                "file_type": os.path.splitext(filename)[1].lower(),
+                "uploaded_at": datetime.now().isoformat()
+            }
+        )
+        return [doc]
 
     def chunk_text(self, text, chunk_size=500, overlap=100):
         chunks = []
@@ -426,6 +397,7 @@ Trả lời:
         self.progress = 100
         self.status = "done"
         print(f"[Hybrid] Built BM25 index with {len(self.all_chunks)} chunks")
+        self._create_blocks()  # Build blocks for summary mode
         return self.vectorstore, parent_docs
 
     def build_fixed_chunk_index(self, text_or_docs, chunk_size=800, overlap=250):
@@ -524,6 +496,8 @@ Trả lời:
             self.chunking_mode = "semantic"
             
         print(f"[Load] Index loaded with mode: {self.chunking_mode}")
+        if self.all_chunks:
+            self._create_blocks() # Re-create blocks in memory
         return True
 
     def _bm25_retrieve(self, query: str, k: int = 10) -> list[Document]:
@@ -637,56 +611,86 @@ Trả lời:"""
             
         return [docs[i] for i in selected_indices]
 
-    def _textrank_mmr_summarize(self, chunks: list[Document], k: int = 12, lambda_val: float = 0.7) -> str:
+    def _textrank_mmr_summarize(self, chunks: list[Document], user_query: str = None, k: int = 15, lambda_val: float = 0.6) -> str:
         """
-        Refines retrieved context by selecting top sentences using TextRank (relevance) 
-        and MMR (diversity).
+        Refines retrieved context by selecting top sentences using TextRank and/or Semantic scoring + MMR.
+        This follows 'Way 3': TextRank or cosine scoring (query/centroid) + MMR.
         """
         if not chunks:
             return ""
         
         # 1. Split into sentences
         raw_text = "\n".join([c.page_content for c in chunks])
-        # Simple sentence splitter
-        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', raw_text) if len(s.strip()) > 20]
+        # Improved sentence splitter
+        sentences = [s.strip() for s in re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=[.!?])\s+', raw_text) if len(s.strip()) > 15]
         
         if len(sentences) <= k:
             return "\n".join(sentences)
             
-        # 2. Embed sentences
-        embeddings = np.array(self.embeddings.embed_documents(sentences))
+        # 2. Embed sentences and normalize safely
+        sent_embeddings = np.array(self.embeddings.embed_documents(sentences))
+        # Add small epsilon to avoid zero vectors causing matmul errors
+        norms = np.linalg.norm(sent_embeddings, axis=1, keepdims=True)
+        sent_embeddings = sent_embeddings / (norms + 1e-10)
         
-        # 3. TextRank (PageRank on similarity matrix)
-        sim_matrix = sklearn_cosine_similarity(embeddings)
-        # Build graph
+        # 3. Calculate Scores (Relevance)
+        # 3a. TextRank score (local importance via graph)
+        sim_matrix = sklearn_cosine_similarity(sent_embeddings)
+        np.fill_diagonal(sim_matrix, 0.0) # Remove self-loops
         nx_graph = nx.from_numpy_array(sim_matrix)
         try:
-            scores = nx.pagerank(nx_graph, max_iter=200)
+            tr_scores_raw = nx.pagerank(nx_graph, max_iter=200)
         except:
-            # Fallback to sum of similarities if PageRank fails to converge
-            scores = {i: sum(sim_matrix[i]) for i in range(len(sentences))}
+            tr_scores_raw = {i: sum(sim_matrix[i]) for i in range(len(sentences))}
             
-        # 4. MMR Selection
+        # 3b. Query similarity
+        use_query_scoring = False
+        query_sims = np.zeros(len(sentences))
+        if user_query and len(user_query.split()) >= 3:
+            use_query_scoring = True
+            query_embedding = np.array(self.embeddings.embed_query(user_query))
+            q_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
+            s_norms = sent_embeddings / (np.linalg.norm(sent_embeddings, axis=1, keepdims=True) + 1e-10)
+            query_sims = np.dot(s_norms, q_norm)
+        
+        # 3c. Centroid similarity
+        centroid = np.mean(sent_embeddings, axis=0)
+        c_norm = centroid / (np.linalg.norm(centroid) + 1e-10)
+        s_norms = sent_embeddings / (np.linalg.norm(sent_embeddings, axis=1, keepdims=True) + 1e-10)
+        centroid_sims = np.dot(s_norms, c_norm)
+        
+        # 4. Normalize and combine for 'Relevance'
+        tr_max = max(tr_scores_raw.values()) if tr_scores_raw.values() else 1.0
+        norm_tr = {i: s / tr_max for i, s in tr_scores_raw.items()}
+        
+        relevance_scores = []
+        for i in range(len(sentences)):
+            if use_query_scoring:
+                # Specific query branch
+                rel = 0.3 * norm_tr[i] + 0.7 * query_sims[i]
+            else:
+                # General/Centroid branch
+                rel = 0.5 * norm_tr[i] + 0.5 * centroid_sims[i]
+            relevance_scores.append(rel)
+            
+        # 5. MMR Selection (Diversity)
         selected_indices = []
         candidate_indices = list(range(len(sentences)))
-        
-        # Normalize scores
-        max_score = max(scores.values()) if scores.values() else 1.0
-        norm_scores = {i: s / max_score for i, s in scores.items()}
         
         while len(selected_indices) < k and candidate_indices:
             best_mmr_score = -float('inf')
             best_idx = -1
             
             for idx in candidate_indices:
-                relevance = norm_scores[idx]
+                relevance = relevance_scores[idx]
                 
                 if not selected_indices:
-                    diversity = 0.0
+                    diversity_penalty = 0.0
                 else:
-                    diversity = max([sim_matrix[idx][s] for s in selected_indices])
+                    # Max similarity to any already selected sentence
+                    diversity_penalty = max([sim_matrix[idx][s] for s in selected_indices])
                 
-                mmr_score = lambda_val * relevance - (1 - lambda_val) * diversity
+                mmr_score = lambda_val * relevance - (1 - lambda_val) * diversity_penalty
                 
                 if mmr_score > best_mmr_score:
                     best_mmr_score = mmr_score
@@ -774,9 +778,43 @@ Trả lời:"""
             )
         return citations
 
-    def query(self, user_query, k=3):
+    def _rewrite_query_with_history(self, user_query: str, session_id: str) -> str:
+        """Uses LLM to rewrite a query based on the last few messages in the session."""
+        history = self.conversations.get(session_id, [])
+        if not history:
+            return user_query
+            
+        # Take last 5 interactions
+        recent_history = history[-5:]
+        history_text = "\n".join([f"User: {u}\nAssistant: {a}" for u, a in recent_history])
+        
+        prompt = f"""Dựa vào lịch sử hội thoại dưới đây, hãy viết lại câu hỏi cuối cùng của người dùng thành một câu hỏi độc lập (standalone query) để có thể dùng tìm kiếm trong tài liệu. 
+Lưu ý: Chỉ trả về câu hỏi đã viết lại, không giải thích gì thêm. Nếu câu hỏi đã rõ ràng, hãy giữ nguyên.
+
+Lịch sử hội thoại:
+{history_text}
+
+Câu hỏi mới: {user_query}
+Standalone Query:"""
+
+        try:
+            if self.local_base_url and self.local_model:
+                rewritten = self._generate_with_lmstudio(prompt)
+            else:
+                rewritten = self._generate_with_google(prompt)
+            print(f"[Memory] Rewritten Query: {rewritten.strip()}")
+            return rewritten.strip()
+        except:
+            return user_query
+
+    def query(self, user_query, k=3, session_id: str = None):
         if self.retriever is None and not self.load_index():
             return "Chua co du lieu. Vui long tai file va index truoc.", []
+
+        # 0. Conversation Rewrite (if session exists)
+        original_query = user_query
+        if session_id:
+            user_query = self._rewrite_query_with_history(user_query, session_id)
 
         # 1. Classification
         q_type = self._classify_query(user_query)
@@ -789,25 +827,28 @@ Trả lời:"""
                 # Tier 1: Block-level retrieval (large context)
                 # We retrieve 3-5 largest blocks to cover a wide range
                 relevant_blocks = self.block_vectorstore.similarity_search(user_query, k=4)
+                self._log_retrieval_stage("Summary:Blocks-Retrieved", relevant_blocks, user_query)
                 
                 # Tier 2: Get child chunks from these blocks for diversity
                 candidate_chunks = []
                 seen_ids = set()
                 for block in relevant_blocks:
                     child_ids = block.metadata.get("child_chunk_ids", [])
-                    # Finding child documents from all_chunks by ID
                     for cid in child_ids:
                         if cid not in seen_ids:
-                            # Map ID to chunk (this is slightly slow but robust)
                             for chunk in self.all_chunks:
                                 if chunk.metadata.get("chunk_id") == cid:
                                     candidate_chunks.append(chunk)
                                     seen_ids.add(cid)
                                     break
                 
-                # Apply MMR for diversity within the candidates to pick the best 'k+4' chunks
+                # Log the raw candidate pool found inside blocks
+                self._log_retrieval_stage("Summary:Candidates-From-Blocks", candidate_chunks, user_query, limit=10)
+                
+                # Apply MMR for diversity
                 query_embedding = self.embeddings.embed_query(user_query)
                 diverse_chunks = self._mmr_select(query_embedding, candidate_chunks, k=k+4, lambda_val=0.4)
+                self._log_retrieval_stage("Summary:Final-Diverse-Chunks (MMR)", diverse_chunks, user_query)
                 
                 return self._generate_summary_from_chunks(user_query, diverse_chunks)
             else:
@@ -818,22 +859,40 @@ Trả lời:"""
                 fused = self._rrf_fusion([bm25_results, dense_results], k=20)
                 query_embedding = self.embeddings.embed_query(user_query)
                 diverse_chunks = self._mmr_select(query_embedding, fused, k=k+6)
+                self._log_retrieval_stage("Fallback-Diverse", diverse_chunks, user_query)
                 
                 return self._generate_summary_from_chunks(user_query, diverse_chunks)
         else:
             # Standard Pipeline for fact-checking
             bm25_results = self._bm25_retrieve(user_query, k=k * 5)
+            self._log_retrieval_stage("bm25", bm25_results, user_query)
+            
             dense_results = self._dense_retrieve(user_query, k=k * 5)
+            self._log_retrieval_stage("dense", dense_results, user_query)
+            
             fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
+            self._log_retrieval_stage("fusion", fused_results, user_query)
+            
             final_results = self._rerank(user_query, fused_results, top_k=k)
+            self._log_retrieval_stage("rerank", final_results, user_query)
+            
             print(f"[Query:Fact] Selected {len(final_results)} reranked chunks")
+            answer, sources = self._generate_answer_from_docs(user_query, final_results)
 
-        return self._generate_answer_from_docs(user_query, final_results)
+        # Update History
+        if session_id:
+            if session_id not in self.conversations:
+                self.conversations[session_id] = []
+            self.conversations[session_id].append((original_query, answer))
+            if len(self.conversations[session_id]) > 15:
+                self.conversations[session_id] = self.conversations[session_id][-15:]
 
-    def _generate_summary_from_chunks(self, user_query: str, chunks: list[Document], k_sentences: int = 15):
+        return answer, sources
+
+    def _generate_summary_from_chunks(self, user_query: str, chunks: list[Document], k_sentences: int = 18):
         """Helper to run TextRank + MMR and generate final summary response."""
         print(f"[SummaryEngine] Refining {len(chunks)} chunks into {k_sentences} gold sentences...")
-        refined_context = self._textrank_mmr_summarize(chunks, k=k_sentences)
+        refined_context = self._textrank_mmr_summarize(chunks, user_query=user_query, k=k_sentences)
         
         prompt = f"Dựa vào các ý chính được trích xuất dưới đây, hãy viết một bản tóm tắt đầy đủ, sâu sắc và mạch lạc cho câu hỏi: '{user_query}'\n\nÝ chính nội dung:\n{refined_context}"
         
@@ -847,7 +906,7 @@ Trả lời:"""
             # Final fallback
             return self._generate_answer_from_docs(user_query, chunks)
 
-    def debug_query(self, user_query, k=3):
+    def debug_query(self, user_query, k=3, session_id: str = None):
         if self.retriever is None and not self.load_index():
             return {
                 "answer": "Chua co du lieu. Vui long tai file va index truoc.",
@@ -855,12 +914,19 @@ Trả lời:"""
                 "debug": {},
             }
 
+        # 0. Rewrite if session exists
+        original_query = user_query
+        if session_id:
+            user_query = self._rewrite_query_with_history(user_query, session_id)
+
         q_type = self._classify_query(user_query)
         
         if q_type == "summary":
             # For debug, we run the logic but capture stages
             if self.block_vectorstore:
                 relevant_blocks = self.block_vectorstore.similarity_search(user_query, k=4)
+                self._log_retrieval_stage("Debug:Summary-Blocks", relevant_blocks, user_query)
+                
                 candidate_chunks = []
                 seen_ids = set()
                 for block in relevant_blocks:
@@ -871,11 +937,20 @@ Trả lời:"""
                                     candidate_chunks.append(chunk)
                                     seen_ids.add(cid)
                                     break
+                
+                self._log_retrieval_stage("Debug:Summary-Candidates", candidate_chunks, user_query, limit=10)
+                
                 q_emb = self.embeddings.embed_query(user_query)
                 diverse_chunks = self._mmr_select(q_emb, candidate_chunks, k=k+4, lambda_val=0.4)
-                refined_context = self._textrank_mmr_summarize(diverse_chunks, k=15)
+                self._log_retrieval_stage("Debug:Summary-Final-Diverse", diverse_chunks, user_query)
                 
+                refined_context = self._textrank_mmr_summarize(diverse_chunks, user_query=user_query, k=15)
                 answer, citations = self._generate_summary_from_chunks(user_query, diverse_chunks)
+                
+                # Detailed JSON response
+                blocks_info = [{"id": b.metadata.get("block_id"), "content": b.page_content[:200]} for b in relevant_blocks]
+                chunks_info = [{"id": d.metadata.get("chunk_id"), "content": d.page_content[:200]} for d in diverse_chunks]
+                candidates_info = [{"id": c.metadata.get("chunk_id"), "content": c.page_content[:150]} for c in candidate_chunks[:10]]
                 
                 return {
                     "answer": answer,
@@ -883,11 +958,10 @@ Trả lời:"""
                     "debug": {
                         "query_type": "summary",
                         "method": "block-based",
-                        "blocks_retrieved": len(relevant_blocks),
-                        "candidate_chunks": len(candidate_chunks),
-                        "diverse_chunks": len(diverse_chunks),
-                        "refined_sentences": refined_context.count("\n") + 1,
-                        "textrank_context_preview": refined_context[:500] + "..."
+                        "blocks_retrieved": blocks_info,
+                        "candidates_preview": candidates_info,
+                        "diverse_chunks": chunks_info,
+                        "refined_sentences_count": refined_context.count("\n") + 1,
                     }
                 }
             else:
@@ -897,7 +971,8 @@ Trả lời:"""
                 fused = self._rrf_fusion([bm25, dense], k=20)
                 q_emb = self.embeddings.embed_query(user_query)
                 diverse_chunks = self._mmr_select(q_emb, fused, k=k+6)
-                refined = self._textrank_mmr_summarize(diverse_chunks, k=15)
+                self._log_retrieval_stage("Debug:Fallback-Diverse", diverse_chunks, user_query)
+                refined = self._textrank_mmr_summarize(diverse_chunks, user_query=user_query, k=15)
                 answer, citations = self._generate_summary_from_chunks(user_query, diverse_chunks)
                 
                 return {
@@ -907,8 +982,8 @@ Trả lời:"""
                         "query_type": "summary",
                         "method": "fallback-mmr",
                         "fusion_count": len(fused),
-                        "diverse_chunks": len(diverse_chunks),
-                        "refined_sentences": refined.count("\n") + 1
+                        "diverse_chunks": [{"id": d.metadata.get("chunk_id"), "content": d.page_content[:200]} for d in diverse_chunks],
+                        "refined_sentences_count": refined.count("\n") + 1
                     }
                 }
 
@@ -924,15 +999,24 @@ Trả lời:"""
         self._log_retrieval_stage("rerank", reranked_results, user_query)
 
         answer, sources = self._generate_answer_from_docs(user_query, reranked_results)
+        
+        # Update History (even in debug)
+        if session_id:
+            if session_id not in self.conversations:
+                self.conversations[session_id] = []
+            self.conversations[session_id].append((original_query, answer))
+            if len(self.conversations[session_id]) > 15:
+                self.conversations[session_id] = self.conversations[session_id][-15:]
+
         return {
             "answer": answer,
             "sources": sources,
             "debug": {
                 "query_type": "fact",
-                "bm25_count": len(bm25_results),
-                "dense_count": len(dense_results),
-                "fusion_count": len(fused_results),
-                "rerank_count": len(reranked_results),
+                "bm25_results": [{"id": d.metadata.get("chunk_id"), "content": d.page_content[:200]} for d in bm25_results],
+                "dense_results": [{"id": d.metadata.get("chunk_id"), "content": d.page_content[:200]} for d in dense_results],
+                "fused_results": [{"id": d.metadata.get("chunk_id"), "content": d.page_content[:200]} for d in fused_results],
+                "reranked_results": [{"id": d.metadata.get("chunk_id"), "content": d.page_content[:200]} for d in reranked_results],
             },
         }
 
@@ -948,3 +1032,39 @@ Trả lời:"""
         fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
         reranked_results = self._rerank(user_query, fused_results, top_k=k)
         return self._generate_answer_from_docs(user_query, reranked_results)
+
+    def _create_blocks(self, block_size_chunks: int = 15, overlap_chunks: int = 3):
+        """Groups chunks into larger blocks using a consistent chunk-based sliding window."""
+        if not self.all_chunks:
+            return
+        
+        print(f"[Blocks] Creating blocks from {len(self.all_chunks)} chunks (Sliding Window)...")
+        blocks = []
+        
+        # Sliding window approach for perfect metadata consistency
+        step = max(1, block_size_chunks - overlap_chunks)
+        for i in range(0, len(self.all_chunks), step):
+            window = self.all_chunks[i : i + block_size_chunks]
+            if not window:
+                break
+                
+            block_text = "\n\n".join([doc.page_content for doc in window])
+            block_ids = [doc.metadata.get("chunk_id") for doc in window if doc.metadata.get("chunk_id")]
+            
+            block_doc = Document(
+                page_content=block_text.strip(),
+                metadata={
+                    "block_id": f"block_{len(blocks)}",
+                    "child_chunk_ids": block_ids,
+                    "chunk_count": len(window)
+                }
+            )
+            blocks.append(block_doc)
+            
+            # If we reached the end, stop
+            if i + block_size_chunks >= len(self.all_chunks):
+                break
+                
+        self.blocks = blocks
+        self.block_vectorstore = FAISS.from_documents(blocks, self.embeddings)
+        print(f"[Blocks] Successfully built {len(blocks)} blocks.")

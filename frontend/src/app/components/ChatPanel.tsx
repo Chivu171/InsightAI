@@ -80,6 +80,9 @@ export function ChatPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  // Generate a persistent session ID for the duration of this component's lifecycle
+  const [sessionId] = useState(() => `session-${Math.random().toString(36).substring(2, 11)}`);
+  
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const currentModeState = modeBuildState[selectedMode];
@@ -121,7 +124,10 @@ export function ChatPanel({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query: messageText }),
+        body: JSON.stringify({ 
+          query: messageText,
+          session_id: sessionId 
+        }),
       });
 
       if (!response.ok) {
