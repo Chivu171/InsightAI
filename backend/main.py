@@ -3,7 +3,7 @@ import shutil
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from rag_pipeline import RAGEngine
+from rag.engine import RAGEngine
 
 app = FastAPI(title="InsightAI API")
 
@@ -80,18 +80,7 @@ async def reset_index():
 async def query_hybrid(request: QueryRequest):
     try:
         answer, sources = rag_engine.query(request.query, session_id=request.session_id)
-        return {
-            "answer": answer,
-            "sources": sources,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/debug/queryHybrid")
-async def debug_query_hybrid(request: QueryRequest):
-    try:
-        result = rag_engine.debug_query(request.query, session_id=request.session_id)
-        return result
+        return {"answer": answer, "sources": sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

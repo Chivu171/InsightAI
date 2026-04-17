@@ -186,7 +186,7 @@ export function DocumentSidebar({
       <button
         onClick={onToggleCollapse}
         className="absolute -right-3 top-6 z-10 hidden size-7 items-center justify-center rounded-full border border-white/80 bg-white shadow-lg transition-colors hover:bg-zinc-50 md:flex"
-        title="Thu gọn sidebar"
+        title="Collapse sidebar"
       >
         <ChevronLeft className="size-3.5 text-zinc-600" />
       </button>
@@ -198,9 +198,9 @@ export function DocumentSidebar({
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700/80">
                 Knowledge Base
               </p>
-              <h2 className="mt-2 text-xl font-semibold text-zinc-950">Tài liệu</h2>
+              <h2 className="mt-2 text-xl font-semibold text-zinc-950">Documents</h2>
               <p className="mt-1 text-sm leading-6 text-zinc-600">
-                Hãy tải lên tài liệu liên quan đến công việc của bạn, sau đó bấm reindex để hệ thống sẵn sàng phân tích.
+                Upload the documents related to your work, then click reindex so the system is ready to analyze them.
               </p>
             </div>
             <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-white/85 text-sky-600 shadow-sm">
@@ -212,14 +212,14 @@ export function DocumentSidebar({
             <div className="rounded-2xl border border-white/70 bg-white/70 p-3">
               <div className="flex items-center gap-2 text-zinc-500">
                 <Files className="size-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Số lượng</span>
+                <span className="text-xs uppercase tracking-[0.18em]">Count</span>
               </div>
               <p className="mt-2 text-2xl font-semibold text-zinc-950">{documents.length}</p>
             </div>
             <div className="rounded-2xl border border-white/70 bg-white/70 p-3">
               <div className="flex items-center gap-2 text-zinc-500">
                 <Database className="size-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Dung lượng</span>
+                <span className="text-xs uppercase tracking-[0.18em]">Size</span>
               </div>
               <p className="mt-2 text-2xl font-semibold text-zinc-950">{formatFileSize(totalSize)}</p>
             </div>
@@ -228,7 +228,7 @@ export function DocumentSidebar({
           <label htmlFor={`file-upload`} className="mt-4 block">
             <div className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-zinc-900 transition-transform duration-200 hover:-translate-y-0.5 hover:bg-zinc-50">
               <Upload className="size-4" />
-              <span className="text-sm font-medium">Chọn tài liệu</span>
+              <span className="text-sm font-medium">Choose files</span>
             </div>
             <input
               id={`file-upload`}
@@ -250,7 +250,7 @@ export function DocumentSidebar({
             ) : (
               <RefreshCw className="size-4" />
             )}
-            Reindex ngay
+            Reindex now
           </Button>
         </div>
 
@@ -263,8 +263,8 @@ export function DocumentSidebar({
                 )}
                  <span className="text-xs font-medium text-zinc-700">
                   {indexStatus === "ready"
-                    ? "✅ Hệ thống đã sẵn sàng!"
-                    : `Đang xây dựng kho tri thức...`}
+                    ? "✅ The system is ready!"
+                    : `Building the knowledge base...`}
                 </span>
               </div>
               <span className="text-xs font-semibold text-blue-600">{progress}%</span>
@@ -282,20 +282,20 @@ export function DocumentSidebar({
               />
             </div>
             <p className="mt-2 text-[11px] text-zinc-500">
-              {progress < 30 && "Đang trích xuất dữ liệu..."}
-              {progress >= 30 && progress < 50 && "Đang khởi tạo vector store..."}
-              {progress >= 50 && progress < 70 && "Đang phân tích ngữ nghĩa..."}
-              {progress >= 70 && progress < 85 && "Đang tạo parent chunks..."}
-              {progress >= 85 && progress < 100 && "Đang lưu index..."}
-              {progress >= 100 && "Index hoàn tất!"}
+              {progress < 30 && "Extracting data..."}
+              {progress >= 30 && progress < 50 && "Initializing vector store..."}
+              {progress >= 50 && progress < 70 && "Analyzing semantics..."}
+              {progress >= 70 && progress < 85 && "Creating parent chunks..."}
+              {progress >= 85 && progress < 100 && "Saving index..."}
+              {progress >= 100 && "Index complete!"}
             </p>
           </div>
         )}
 
         {indexStatus === "needs_rebuild" && (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/90 p-3 text-xs leading-5 text-amber-900">
-            Danh sách tài liệu đã thay đổi. Hãy bấm <span className="font-semibold">Reindex</span>{" "}
-            trước khi đặt câu hỏi.
+            The document list has changed. Click <span className="font-semibold">Reindex</span>{" "}
+            before asking questions.
           </div>
         )}
 
@@ -303,7 +303,7 @@ export function DocumentSidebar({
           <div className="relative mt-4">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
             <Input
-              placeholder="Tìm kiếm tài liệu..."
+              placeholder="Search documents..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-11 rounded-2xl border-white/70 bg-white/85 pl-9 shadow-sm"
@@ -319,13 +319,13 @@ export function DocumentSidebar({
               <div className="mb-4 flex size-18 items-center justify-center rounded-full bg-zinc-100">
                 <FileText className="size-8 text-zinc-400" />
               </div>
-              <p className="text-sm font-medium text-zinc-800">Chưa có tài liệu nào</p>
+              <p className="text-sm font-medium text-zinc-800">No documents yet</p>
               <p className="mt-1 max-w-[18rem] text-xs leading-5 text-zinc-500">
-                Tải lên PDF, Word, Excel, CSV hoặc hình ảnh để bắt đầu xây dựng kho tri thức.
+                Upload PDF, Word, Excel, CSV, or image files to start building the knowledge base.
               </p>
             </div>
           ) : filteredDocuments.length === 0 ? (
-            <div className="py-8 text-center text-sm text-zinc-500">Không tìm thấy tài liệu phù hợp</div>
+            <div className="py-8 text-center text-sm text-zinc-500">No matching documents found</div>
           ) : (
             filteredDocuments.map((doc) => (
               <div
@@ -346,7 +346,7 @@ export function DocumentSidebar({
                         {formatFileSize(doc.size)}
                       </Badge>
                       <span className="text-xs text-zinc-400">
-                        {doc.uploadedAt.toLocaleDateString("vi-VN")}
+                        {doc.uploadedAt.toLocaleDateString("en-US")}
                       </span>
                     </div>
                   </div>
@@ -355,8 +355,8 @@ export function DocumentSidebar({
                     size="sm"
                     onClick={() => removeDocument(doc.id)}
                     className="h-8 w-8 shrink-0 p-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
-                    aria-label={`Xóa tài liệu ${doc.name}`}
-                    title={`Xóa ${doc.name}`}
+                    aria-label={`Delete document ${doc.name}`}
+                    title={`Delete ${doc.name}`}
                   >
                     <Trash2 className="size-4 text-red-500" />
                   </Button>
@@ -370,8 +370,8 @@ export function DocumentSidebar({
       {documents.length > 0 && (
         <div className="border-t border-zinc-200/80 bg-white/70 p-4">
           <div className="flex items-center justify-between text-xs text-zinc-500">
-            <span>{documents.length} tài liệu</span>
-            <span>{formatFileSize(totalSize)} tổng</span>
+            <span>{documents.length} documents</span>
+            <span>{formatFileSize(totalSize)} total</span>
           </div>
         </div>
       )}

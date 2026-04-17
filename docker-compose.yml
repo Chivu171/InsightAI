@@ -7,7 +7,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - /app/prj2  # Keep the local venv out of the container
+      - /app/prj2 # Keep the local venv out of the container
     env_file:
       - ./backend/.env
     restart: always

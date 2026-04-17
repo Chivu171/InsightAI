@@ -71,7 +71,7 @@ export default function App() {
           {isMobile && !sidebarCollapsed && (
             <>
               <button
-                aria-label="Đóng tài liệu"
+                aria-label="Close documents"
                 className="absolute inset-0 z-20 bg-zinc-950/30 backdrop-blur-[2px]"
                 onClick={() => setSidebarCollapsed(true)}
               />

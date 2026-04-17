@@ -56,7 +56,6 @@ export interface Message {
   content: string;
   timestamp: Date;
   citations?: Citation[];
-  debug?: Record<string, unknown>;
 }
 
 interface ChatPanelProps {
@@ -84,17 +83,12 @@ export function ChatPanel({
   const modeReady = modeBuildState.status === "ready";
 
   const handleSend = async (customInput?: string) => {
-    await handleQuery(customInput, false);
+    await handleQuery(customInput);
   };
 
-  const handleDebugSend = async (customInput?: string) => {
-    await handleQuery(customInput, true);
-  };
-
-  const handleQuery = async (customInput?: string, debugMode = false) => {
+  const handleQuery = async (customInput?: string) => {
     const messageText = customInput || input.trim();
     if (!messageText || isLoading || !modeReady) return;
-    // Single-mode UI: debug is always for the hybrid pipeline.
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -108,9 +102,7 @@ export function ChatPanel({
     setIsLoading(true);
 
     try {
-      const queryPath = debugMode ? "/debug/queryHybrid" : "/queryHybrid";
-
-      const response = await apiFetch(queryPath, {
+      const response = await apiFetch("/queryHybrid", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -133,7 +125,7 @@ export function ChatPanel({
         timestamp: new Date(),
         citations: data.sources.map((source: CitationApiResponse, idx: number) => ({
           documentId: source.document_id || `source-${idx}`,
-          documentName: source.document_name || "Tài liệu trích dẫn",
+          documentName: source.document_name || "Cited document",
           page: source.page,
           chunkId: source.chunk_id,
           chunkIndex: source.chunk_index,
@@ -141,7 +133,6 @@ export function ChatPanel({
           uploadedAt: source.uploaded_at,
           snippet: source.snippet,
         })),
-        debug: data.debug,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -151,7 +142,7 @@ export function ChatPanel({
         id: `assistant-${Date.now()}`,
         role: "assistant",
         content:
-          "Xin lỗi, đã có lỗi xảy ra khi kết nối với máy chủ. Vui lòng đảm bảo Backend đang chạy.",
+          "Sorry, an error occurred while connecting to the server. Please make sure the backend is running.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -167,13 +158,13 @@ export function ChatPanel({
     let actionPrompt = "";
     switch (action) {
       case "explain":
-        actionPrompt = "Giải thích chi tiết hơn về câu trả lời trước";
+        actionPrompt = "Explain the previous answer in more detail";
         break;
       case "shorter":
-        actionPrompt = "Tóm tắt câu trả lời trước ngắn gọn hơn";
+        actionPrompt = "Summarize the previous answer more concisely";
         break;
       case "example":
-        actionPrompt = "Cho ví dụ cụ thể về nội dung vừa nói";
+        actionPrompt = "Give a concrete example of what was just discussed";
         break;
       case "regenerate": {
         const previousUserMessage = messages[messages.indexOf(originalMessage) - 1];
@@ -206,14 +197,14 @@ export function ChatPanel({
   const suggestedPrompts =
     documentCount > 0
       ? [
-          "Tóm tắt 3 điểm quan trọng nhất từ bộ tài liệu này",
-          "So sánh các thông tin chính giữa những tài liệu đã tải lên",
-          "Liệt kê các rủi ro, cơ hội hoặc insight đáng chú ý",
+          "Summarize the 3 most important points from this document set",
+          "Compare the main information across the uploaded documents",
+          "List notable risks, opportunities, or insights",
         ]
       : [
-          "Tôi nên tải loại tài liệu nào để bắt đầu?",
-          "Ứng dụng này có thể hỗ trợ những kiểu câu hỏi nào?",
-          "Hướng dẫn tôi chuẩn bị bộ tài liệu cho AI phân tích",
+          "What kinds of documents should I upload to get started?",
+          "What types of questions can this app answer?",
+          "Guide me on preparing a document set for AI analysis",
         ];
 
   return (
@@ -224,7 +215,7 @@ export function ChatPanel({
             <button
               onClick={onToggleSidebar}
               className="mt-1 flex size-10 shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white/80 text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
-              title="Mở sidebar"
+              title="Open sidebar"
             >
               {sidebarCollapsed ? <ChevronRight className="size-4" /> : <Menu className="size-4" />}
             </button>
@@ -238,15 +229,15 @@ export function ChatPanel({
               <h2 className="mt-1 text-2xl font-semibold text-zinc-950">AI Assistant</h2>
               <p className="mt-1 text-sm text-zinc-500">
                 {modeReady
-                  ? `Hệ thống đã sẵn sàng để phân tích tài liệu`
-                  : `Vui lòng tải lên tài liệu và build index để bắt đầu.`}
+                  ? `The system is ready to analyze documents`
+                  : `Please upload documents and build the index to begin.`}
               </p>
             </div>
           </div>
           <div className="hidden items-center gap-2 md:flex">
             <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
               <LibraryBig className="mr-1 size-3.5" />
-              {documentCount} tài liệu
+              {documentCount} documents
             </Badge>
             <Badge
               className={`rounded-full px-3 py-1 ${
@@ -255,7 +246,7 @@ export function ChatPanel({
                   : "border border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-50"
               }`}
             >
-              {modeReady ? "Sẵn sàng phân tích" : "Cần build lại index"}
+              {modeReady ? "Ready to analyze" : "Index rebuild required"}
             </Badge>
           </div>
         </div>
@@ -271,19 +262,19 @@ export function ChatPanel({
                     <Bot className="size-9 text-sky-700" />
                   </div>
                   <h3 className="text-3xl font-semibold leading-tight text-zinc-950 md:text-4xl">
-                    Hỏi đáp trên tài liệu theo cách rõ ràng và có trích dẫn.
+                    Ask questions about your documents with clear, cited answers.
                   </h3>
                   <p className="mt-3 max-w-xl text-sm leading-7 text-zinc-600 md:text-base">
                     {modeReady
-                      ? "Mode hiện tại đã có index. Bạn có thể yêu cầu tóm tắt, đối chiếu điểm khác nhau, rút insight hoặc truy xuất câu trả lời chi tiết."
-                      : "Chọn mode bạn muốn dùng, sau đó upload tài liệu để build lại index cho đúng pipeline trước khi bắt đầu hỏi đáp."}
+                      ? "The current mode already has an index. You can ask for summaries, comparisons, insights, or detailed answers."
+                      : "Choose the mode you want to use, then upload documents and rebuild the index so the pipeline is ready before you start asking questions."}
                   </p>
                 </div>
 
                   <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
-                    <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Trạng thái</p>
+                    <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Status</p>
                     <p className="mt-2 text-lg font-semibold text-zinc-950">
-                      {modeReady ? "Đã sẵn sàng" : "Chờ build index"}
+                      {modeReady ? "Ready" : "Waiting for index build"}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
@@ -358,7 +349,7 @@ export function ChatPanel({
                         <div className="mt-3 max-w-[88%] space-y-2">
                           <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500">
                             <FileText className="size-3.5" />
-                            Nguồn tham khảo:
+                            References:
                           </div>
                           {message.citations.map((citation, idx) => (
                             <div
@@ -394,7 +385,7 @@ export function ChatPanel({
                                     variant="secondary"
                                     className="shrink-0 rounded-full border border-sky-200 bg-white text-xs text-sky-700"
                                   >
-                                    Trang {citation.page}
+                                    Page {citation.page}
                                   </Badge>
                                 )}
                               </div>
@@ -412,7 +403,7 @@ export function ChatPanel({
                           className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <MessageCircle className="size-3" />
-                          Giải thích thêm
+                          Explain more
                         </Button>
                         <Button
                           variant="outline"
@@ -421,7 +412,7 @@ export function ChatPanel({
                           className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <Minimize2 className="size-3" />
-                          Ngắn gọn hơn
+                          Shorten
                         </Button>
                         <Button
                           variant="outline"
@@ -430,7 +421,7 @@ export function ChatPanel({
                           className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <Lightbulb className="size-3" />
-                          Ví dụ
+                          Example
                         </Button>
                         <Button
                           variant="outline"
@@ -439,24 +430,16 @@ export function ChatPanel({
                           className="h-8 rounded-full border-white/80 bg-white/80 text-xs shadow-sm"
                         >
                           <RotateCcw className="size-3" />
-                          Tạo lại
+                          Regenerate
                         </Button>
-                        {message.debug && (
-                          <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
-                            <p className="mb-2 font-medium text-zinc-900">Debug retrieval</p>
-                            <pre className="overflow-x-auto whitespace-pre-wrap">
-                              {JSON.stringify(message.debug, null, 2)}
-                            </pre>
-                          </div>
-                        )}
                       </div>
                     )}
 
                     <p className="mt-1 px-1 text-xs text-zinc-400">
-                      {message.timestamp.toLocaleTimeString("vi-VN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                    {message.timestamp.toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                     </p>
                   </div>
                 </div>
@@ -473,7 +456,7 @@ export function ChatPanel({
                 <div className="rounded-[24px] border border-white/80 bg-white/80 px-4 py-3 shadow-sm">
                   <div className="flex items-center gap-2 text-sm text-zinc-500">
                     <Loader2 className="size-4 animate-spin text-sky-700" />
-                    AI đang tổng hợp câu trả lời...
+                    AI is generating the answer...
                   </div>
                 </div>
               </div>
@@ -487,19 +470,19 @@ export function ChatPanel({
           <div className="relative rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
             <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
               <Badge className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600 hover:bg-zinc-50">
-                Enter để gửi
+                Press Enter to send
               </Badge>
               <Badge className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600 hover:bg-zinc-50">
-                Shift + Enter xuống dòng
+                Shift + Enter for a new line
               </Badge>
               {documentCount > 0 && (
                 <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
-                  Đang sử dụng {documentCount} tài liệu phân tích
+                  Using {documentCount} analyzed documents
                 </Badge>
               )}
               {!modeReady && (
                 <Badge className="rounded-full border border-amber-100 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50">
-                  Hãy build lại index trước khi hỏi
+                  Rebuild the index before asking
                 </Badge>
               )}
             </div>
@@ -511,8 +494,8 @@ export function ChatPanel({
               onKeyDown={handleKeyDown}
               placeholder={
                 modeReady
-                  ? "Đặt câu hỏi về tài liệu của bạn..."
-                  : `Hệ thống chưa sẵn sàng. Hãy build index từ sidebar trước.`
+                  ? "Ask a question about your documents..."
+                  : `The system is not ready yet. Build the index from the sidebar first.`
               }
               className="min-h-[120px] max-h-44 rounded-[22px] border-zinc-200/80 bg-zinc-50/70 px-4 py-3 pr-14 text-sm leading-7 shadow-inner"
               disabled={isLoading || !modeReady}
@@ -520,15 +503,6 @@ export function ChatPanel({
 
             <div className="absolute bottom-6 right-6">
               <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleDebugSend()}
-                  disabled={!input.trim() || isLoading || !modeReady}
-                  className="h-10 rounded-2xl border-sky-200 bg-sky-50 px-3 text-sky-700 hover:bg-sky-100"
-                >
-                  Debug
-                </Button>
                 <Button
                   size="sm"
                   onClick={() => handleSend()}

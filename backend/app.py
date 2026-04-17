@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from rag_pipeline import RAGEngine
+from rag.engine import RAGEngine
 
 # Page config
 st.set_page_config(page_title="InsightAI - Academic RAG", page_icon="🤖", layout="wide")
@@ -21,20 +21,15 @@ with st.sidebar:
     st.subheader("📁 Dữ liệu")
     uploaded_file = st.file_uploader("Tải lên file PDF hoặc Text", type=["pdf", "txt", "csv"])
     
-    rag_mode = st.selectbox("Chế độ xử lý", ["Hybrid (Phẳng)", "Fixed-size (Cố định)"])
-    
     if st.button("Re-index Data"):
         if uploaded_file:
             with st.spinner("Đang xử lý dữ liệu..."):
                 documents = st.session_state.rag.extract_documents(uploaded_file)
                 if documents:
                     st.session_state.rag.clear_index()
-                    if rag_mode == "Fixed-size (Cố định)":
-                        st.session_state.rag.build_fixed_chunk_index(documents)
-                    else:
-                        st.session_state.rag.build_index(documents)
+                    st.session_state.rag.build_index(documents)
                     st.session_state.rag.save_index()
-                    st.success(f"Đã index xong (Chế độ: {rag_mode}) từ {uploaded_file.name}!")
+                    st.success(f"Đã index xong từ {uploaded_file.name}!")
                 else:
                     st.error("Không thể đọc nội dung file.")
         else:

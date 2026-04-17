@@ -92,6 +92,6 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   // Should not happen; defensive return.
   throw (
     lastError ??
-    new Error("Không thể kết nối backend (đã thử remote và localhost:8000).")
+    new Error("Unable to connect to the backend (tried remote and localhost:8000).")
   );
 }
