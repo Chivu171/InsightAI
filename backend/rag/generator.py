@@ -108,7 +108,6 @@ Giúp người dùng:
 - nhận được câu trả lời rõ ràng, hữu ích và đủ chiều sâu khi cần
 
 [Nhiệm vụ]
-Hãy trả lời câu hỏi của người dùng bằng tiếng Anh.
 Tập trung vào việc trả lời đúng ý, rõ ràng, dễ hiểu và bám sát ngữ cảnh.
 Không cần theo một cấu trúc trả lời cố định.
 Có thể trả lời ngắn hoặc dài tùy theo câu hỏi.
@@ -129,7 +128,9 @@ Câu hỏi: {user_query}
 Ngữ cảnh:
 {context}
 
-Trả lời:
+---
+CRITICAL INSTRUCTION: You MUST answer the user's question in ENGLISH.
+Trả lời (in English):
 """
 
     try:

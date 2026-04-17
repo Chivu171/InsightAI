@@ -35,39 +35,45 @@ InsightAI follows a sophisticated retrieval-augmented generation (RAG) pattern, 
 
 ```mermaid
 graph TD
-    subgraph "Data Ingestion & Processing"
+    subgraph "Data Ingestion (Text-Only)"
         A[User Uploads: PDF, DOCX, CSV, TXT] --> B[Text Extraction: PyMuPDF/docx2txt]
         B --> C{Chunking Strategy}
         C -->|Semantic| D[Semantic Chunks]
         D --> E[Hybrid Indexing]
         E --> F[FAISS Vector Store - Dense]
         E --> G[BM25 Index - Keyword]
-        D --> H[Sliding Window Blocks - Summary]
+        D --> H[Sliding Window Blocks - Summary Index]
     end
 
-    subgraph "Query Pipeline (Context-Aware)"
-        I[User Query] --> J[Session History Retrieval]
-        J --> K[LLM Query Rewriter]
-        K --> L{Intent Classification}
-        L -->|Fact| M[Fact Pipeline: Hybrid Search]
-        L -->|Summary| N[Summary Pipeline: Block Retrieval]
+    subgraph "Query Pipeline (Dynamic Routing)"
+        I[User Query] --> J{Has SessionID?}
+        J -->|Yes| K[History Rewriter: Standalone Query]
+        J -->|No| L[Intent Classifier]
+        K --> L
+        
+        L -->|Type: Fact| FACT_PATH[Fact Pipeline]
+        L -->|Type: Summary| SUM_PATH[Summary Pipeline]
     end
 
-    subgraph "Reranking & Selection"
-        M --> O[RRF Fusion]
-        O --> P[Cross-Encoder Reranker]
-        N --> Q[MMR Diversity Selection]
-        Q --> R[TextRank Sentence Extraction]
+    subgraph "Fact Path: Precision Search"
+        FACT_PATH --> BM25_R[BM25 Search]
+        FACT_PATH --> DENSE_R[Dense Search]
+        BM25_R & DENSE_R --> FUSION[RRF Fusion]
+        FUSION --> RERANK[Cross-Encoder Reranking]
+    end
+
+    subgraph "Summary Path: Context Search"
+        SUM_PATH --> BLOCKS[Block Similarity Search]
+        BLOCKS --> MMR[MMR Diversity Selection]
+        MMR --> TRANN[TextRank Feature Extraction]
     end
 
     subgraph "Response Generation"
-        P --> S[Context Construction]
-        R --> S
-        S --> T[LLM: LM Studio / Gemini]
-        T --> U[Final Answer with Citations]
+        RERANK --> GEN[LLM Generation]
+        TRANN --> GEN
+        GEN --> HIST[Update Session Memory]
+        HIST --> RESP[Final Answer + Sources]
     end
-
-    U --> UI[React Frontend Dashboard]
 ```
 
 ---

@@ -22,7 +22,7 @@ const joinUrl = (baseUrl: string, path: string) => {
   return `${baseUrl}${normalizedPath}`;
 };
 
-const DEFAULT_TIMEOUT_MS_REMOTE = 2500;
+const DEFAULT_TIMEOUT_MS_REMOTE = 100000;
 const DEFAULT_TIMEOUT_MS_LOCAL = 100000;
 const LONG_RUNNING_TIMEOUT_MS_LOCAL = 20 * 60 * 1000;
 

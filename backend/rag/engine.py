@@ -278,38 +278,43 @@ Trả lời:"""
             return "Chua co du lieu. Vui long tai file va index truoc.", []
 
         original_query = user_query
+        # Branching logic for session history
         if session_id:
             user_query = self._rewrite_query_with_history(user_query, session_id)
 
         q_type = self._classify_query(user_query)
         print("Query type:", q_type)
+
         if q_type == "summary":
+            # Summary Pipeline: Block Retrieval -> MMR -> Summary Generation
             if self.block_vectorstore:
                 relevant_blocks = self.block_vectorstore.similarity_search(user_query, k=4)
                 retrieval.log_retrieval_stage("Summary:Blocks-Retrieved", relevant_blocks, user_query)
+                
+                # Performance Optimization: O(1) lookup map
+                chunk_map = {c.metadata.get("chunk_id"): c for c in self.all_chunks}
                 candidate_chunks = []
                 seen_ids = set()
                 for block in relevant_blocks:
                     for cid in block.metadata.get("child_chunk_ids", []):
-                        if cid in seen_ids:
-                            continue
-                        for chunk in self.all_chunks:
-                            if chunk.metadata.get("chunk_id") == cid:
-                                candidate_chunks.append(chunk)
-                                seen_ids.add(cid)
-                                break
+                        if cid in chunk_map and cid not in seen_ids:
+                            candidate_chunks.append(chunk_map[cid])
+                            seen_ids.add(cid)
+
                 retrieval.log_retrieval_stage("Summary:Candidates-From-Blocks", candidate_chunks, user_query, limit=10)
                 query_embedding = self.embeddings.embed_query(user_query)
                 diverse_chunks = self._mmr_select(query_embedding, candidate_chunks, k=k + 4, lambda_val=0.4)
                 retrieval.log_retrieval_stage("Summary:Final-Diverse-Chunks (MMR)", diverse_chunks, user_query)
                 answer, sources = self._generate_summary_from_chunks(user_query, diverse_chunks)
             else:
-                bm25, dense, fused, _ = self._run_fact_pipeline(user_query, k=20)
+                # Fallback path if block store is missing
+                bm25, dense, fused, reranked = self._run_fact_pipeline(user_query, k=20)
                 query_embedding = self.embeddings.embed_query(user_query)
-                diverse_chunks = self._mmr_select(query_embedding, fused, k=k + 6)
+                diverse_chunks = self._mmr_select(query_embedding, reranked, k=k + 6)
                 retrieval.log_retrieval_stage("Fallback-Diverse", diverse_chunks, user_query)
                 answer, sources = self._generate_summary_from_chunks(user_query, diverse_chunks)
         else:
+            # Fact Pipeline: Hybrid Search (BM25 + Dense) -> RRF -> Rerank
             bm25_results, dense_results, fused_results, reranked_results = self._run_fact_pipeline(
                 user_query, k=k
             )
