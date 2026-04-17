@@ -12,7 +12,7 @@ export interface ModeBuildState {
 export default function App() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [modeBuildState, setModeBuildState] = useState<ModeBuildState>({
+  const [indexingStatus, setIndexingStatus] = useState<ModeBuildState>({
     status: "needs_rebuild", 
     progress: 0 
   });
@@ -29,7 +29,7 @@ export default function App() {
       console.error("Failed to reset index:", error);
     });
 
-    setModeBuildState({ status: "needs_rebuild", progress: 0 });
+    setIndexingStatus({ status: "needs_rebuild", progress: 0 });
   };
 
   return (
@@ -51,8 +51,8 @@ export default function App() {
               <DocumentSidebar
                 onDocumentsChange={setDocuments}
                 collapsed={sidebarCollapsed}
-                modeBuildState={modeBuildState}
-                onModeBuildStateChange={setModeBuildState}
+                indexingStatus={indexingStatus}
+                onIndexingStatusChange={setIndexingStatus}
                 onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
               />
             </div>
@@ -79,8 +79,8 @@ export default function App() {
                 <DocumentSidebar
                   onDocumentsChange={setDocuments}
                   collapsed={sidebarCollapsed}
-                  modeBuildState={modeBuildState}
-                  onModeBuildStateChange={setModeBuildState}
+                  indexingStatus={indexingStatus}
+                  onIndexingStatusChange={setIndexingStatus}
                   onToggleCollapse={() => setSidebarCollapsed(true)}
                 />
               </div>
