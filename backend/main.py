@@ -16,12 +16,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize separate engines for each chunking strategy
-rag_hybrid = RAGEngine()
-rag_hybrid.load_index()
-rag_fixed = RAGEngine()
+# Initialize RAG Engine
+rag_engine = RAGEngine()
+rag_engine.load_index()
 
-# Ensure temp directory for Docling
+# Ensure upload directory
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -30,124 +29,60 @@ class QueryRequest(BaseModel):
     session_id: str = None
 
 
-def get_engine(mode: str) -> RAGEngine:
-    engine = {"hybrid": rag_hybrid, "fixed": rag_fixed}.get(mode)
-    if engine is None:
-        raise HTTPException(status_code=404, detail="Mode not found.")
-    return engine
-
 @app.get("/status")
 async def get_status():
     return {
-        "hybrid": {
-            "status": "ready" if rag_hybrid.vectorstore is not None else "no_index",
-            "vector_count": rag_hybrid.vectorstore.index.ntotal if rag_hybrid.vectorstore else 0,
-            "chunking_mode": rag_hybrid.chunking_mode,
-        },
-        "fixed": {
-            "status": "ready" if rag_fixed.vectorstore is not None else "no_index",
-            "vector_count": rag_fixed.vectorstore.index.ntotal if rag_fixed.vectorstore else 0,
-            "chunking_mode": rag_fixed.chunking_mode,
-        },
+        "status": "ready" if rag_engine.vectorstore is not None else "no_index",
+        "vector_count": rag_engine.vectorstore.index.ntotal if rag_engine.vectorstore else 0,
     }
 
 @app.post("/upload")
-async def upload_hybrid(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     try:
-        documents = rag_hybrid.extract_documents(file)
-
+        documents = rag_engine.extract_documents(file)
         if not documents:
             raise HTTPException(status_code=400, detail="Could not extract text.")
 
         def process():
-            rag_hybrid.clear_index()
-            rag_hybrid.build_index(documents)
-            rag_hybrid.save_index()
+            rag_engine.clear_index()
+            rag_engine.build_index(documents)
+            rag_engine.save_index()
 
         background_tasks.add_task(process)
-
-        return {
-            "message": "File uploaded. Hybrid indexing in progress...",
-            "status": "processing",
-            "mode": "hybrid",
-        }
-
+        return {"message": "Processing...", "status": "processing"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/uploadHybrid")
 async def upload_hybrid_alias(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    return await upload_hybrid(file=file, background_tasks=background_tasks)
-
-@app.post("/uploadSimpleChunking")
-async def upload_simple_chunking(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    try:
-        documents = rag_fixed.extract_documents(file)
-
-        if not documents:
-            raise HTTPException(status_code=400, detail="Could not extract text.")
-
-        def process():
-            rag_fixed.clear_index()
-            rag_fixed.build_fixed_chunk_index(documents)
-
-        background_tasks.add_task(process)
-
-        return {
-            "message": "File uploaded. Fixed chunk indexing in progress...",
-            "status": "processing",
-            "mode": "fixed",
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Alias for backward compatibility"""
+    return await upload_file(file=file, background_tasks=background_tasks)
 
 
 @app.get("/progress")
 async def get_progress():
-    return {
-        "hybrid": {
-            "status": rag_hybrid.status,
-            "progress": rag_hybrid.progress,
-        },
-        "fixed": {
-            "status": rag_fixed.status,
-            "progress": rag_fixed.progress,
-        },
+    # Return format flattened for simplicity, but keep hybrid key for FE compatibility if needed
+    # Let's keep it compatible for now but add a flat version
+    data = {
+        "status": rag_engine.status,
+        "progress": rag_engine.progress,
     }
-
-@app.get("/progress/{mode}")
-async def get_progress_by_mode(mode: str):
-    engine = get_engine(mode)
-
-    return {
-        "mode": mode,
-        "status": engine.status,
-        "progress": engine.progress,
-    }
+    return {"hybrid": data, **data}
 
 
-@app.post("/reset/{mode}")
-async def reset_mode(mode: str):
-    engine = get_engine(mode)
-    engine.clear_index()
-
-    if mode == "hybrid":
-        shutil.rmtree("vector_db", ignore_errors=True)
-
-    return {
-        "mode": mode,
-        "status": "reset",
-    }
+@app.post("/reset")
+async def reset_index():
+    rag_engine.clear_index()
+    shutil.rmtree("vector_db", ignore_errors=True)
+    return {"status": "reset"}
 
 @app.post("/queryHybrid")
 async def query_hybrid(request: QueryRequest):
     try:
-        answer, sources = rag_hybrid.query(request.query, session_id=request.session_id)
+        answer, sources = rag_engine.query(request.query, session_id=request.session_id)
         return {
             "answer": answer,
             "sources": sources,
-            "mode": "hybrid",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -155,25 +90,9 @@ async def query_hybrid(request: QueryRequest):
 @app.post("/debug/queryHybrid")
 async def debug_query_hybrid(request: QueryRequest):
     try:
-        result = rag_hybrid.debug_query(request.query, session_id=request.session_id)
-        return {
-            "mode": "hybrid",
-            **result,
-        }
+        result = rag_engine.debug_query(request.query, session_id=request.session_id)
+        return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/querySimpleChunking")
-async def query_simple_chunking(request: QueryRequest):
-    try:
-        answer, sources = rag_fixed.query_fixed_chunking(request.query)
-        return {
-            "answer": answer,
-            "sources": sources,
-            "mode": "fixed",
-        }
-    except Exception as e:
-        print("querySimpleChunking error:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

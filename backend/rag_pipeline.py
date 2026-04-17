@@ -206,21 +206,41 @@ class RAGEngine:
             chunk.metadata = metadata
         return chunks
 
-    def _prepare_fixed_chunks(self, docs: list[Document], chunk_size=500, overlap=100) -> list[Document]:
-        fixed_chunks: list[Document] = []
-
-        for doc in docs:
-            raw_chunks = self.chunk_text(doc.page_content, chunk_size=chunk_size, overlap=overlap)
-            for local_index, chunk_text in enumerate(raw_chunks, start=1):
-                cleaned_chunk = chunk_text.strip()
-                if not cleaned_chunk:
-                    continue
-
-                metadata = dict(doc.metadata)
-                metadata["fixed_chunk_local_index"] = local_index
-                fixed_chunks.append(Document(page_content=cleaned_chunk, metadata=metadata))
-
-        return self._attach_chunk_metadata(fixed_chunks)
+    def _create_blocks(self, block_size_chunks: int = 15, overlap_chunks: int = 3):
+        """Groups chunks into larger blocks using a consistent chunk-based sliding window."""
+        if not self.all_chunks:
+            return
+        
+        print(f"[Blocks] Creating blocks from {len(self.all_chunks)} chunks (Sliding Window)...")
+        blocks = []
+        
+        # Sliding window approach for perfect metadata consistency
+        step = max(1, block_size_chunks - overlap_chunks)
+        for i in range(0, len(self.all_chunks), step):
+            window = self.all_chunks[i : i + block_size_chunks]
+            if not window:
+                break
+                
+            block_text = "\n\n".join([doc.page_content for doc in window])
+            block_ids = [doc.metadata.get("chunk_id") for doc in window if doc.metadata.get("chunk_id")]
+            
+            block_doc = Document(
+                page_content=block_text.strip(),
+                metadata={
+                    "block_id": f"block_{len(blocks)}",
+                    "child_chunk_ids": block_ids,
+                    "chunk_count": len(window)
+                }
+            )
+            blocks.append(block_doc)
+            
+            # If we reached the end, stop
+            if i + block_size_chunks >= len(self.all_chunks):
+                break
+                
+        self.blocks = blocks
+        self.block_vectorstore = FAISS.from_documents(blocks, self.embeddings)
+        print(f"[Blocks] Successfully built {len(blocks)} blocks.")
 
     def _generate_answer_from_docs(self, user_query: str, docs: list[Document]):
         citations = self._build_citations(docs)
@@ -1019,52 +1039,3 @@ Standalone Query:"""
                 "reranked_results": [{"id": d.metadata.get("chunk_id"), "content": d.page_content[:200]} for d in reranked_results],
             },
         }
-
-    def query_fixed_chunking(self, user_query, k=3):
-        if self.retriever is None or self.chunking_mode != "fixed":
-            return (
-                "Chua co fixed chunk index. Hay chay build_fixed_chunk_index(...) truoc khi query.",
-                [],
-            )
-
-        bm25_results = self._bm25_retrieve(user_query, k=k * 5)
-        dense_results = self._dense_retrieve(user_query, k=k * 5)
-        fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
-        reranked_results = self._rerank(user_query, fused_results, top_k=k)
-        return self._generate_answer_from_docs(user_query, reranked_results)
-
-    def _create_blocks(self, block_size_chunks: int = 15, overlap_chunks: int = 3):
-        """Groups chunks into larger blocks using a consistent chunk-based sliding window."""
-        if not self.all_chunks:
-            return
-        
-        print(f"[Blocks] Creating blocks from {len(self.all_chunks)} chunks (Sliding Window)...")
-        blocks = []
-        
-        # Sliding window approach for perfect metadata consistency
-        step = max(1, block_size_chunks - overlap_chunks)
-        for i in range(0, len(self.all_chunks), step):
-            window = self.all_chunks[i : i + block_size_chunks]
-            if not window:
-                break
-                
-            block_text = "\n\n".join([doc.page_content for doc in window])
-            block_ids = [doc.metadata.get("chunk_id") for doc in window if doc.metadata.get("chunk_id")]
-            
-            block_doc = Document(
-                page_content=block_text.strip(),
-                metadata={
-                    "block_id": f"block_{len(blocks)}",
-                    "child_chunk_ids": block_ids,
-                    "chunk_count": len(window)
-                }
-            )
-            blocks.append(block_doc)
-            
-            # If we reached the end, stop
-            if i + block_size_chunks >= len(self.all_chunks):
-                break
-                
-        self.blocks = blocks
-        self.block_vectorstore = FAISS.from_documents(blocks, self.embeddings)
-        print(f"[Blocks] Successfully built {len(blocks)} blocks.")

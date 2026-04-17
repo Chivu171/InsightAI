@@ -21,7 +21,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Document } from "./DocumentSidebar";
-import type { ChunkingMode, ModeBuildState } from "../App";
+import type { ModeBuildState } from "../App";
 import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -62,18 +62,14 @@ export interface Message {
 interface ChatPanelProps {
   documentCount?: number;
   documents?: Document[];
-  selectedMode: ChunkingMode;
-  modeBuildState: Record<ChunkingMode, ModeBuildState>;
-  onModeChange: (mode: ChunkingMode) => void;
+  modeBuildState: ModeBuildState;
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
 }
 
 export function ChatPanel({
   documentCount = 0,
-  selectedMode,
   modeBuildState,
-  onModeChange,
   sidebarCollapsed,
   onToggleSidebar,
 }: ChatPanelProps) {
@@ -85,8 +81,7 @@ export function ChatPanel({
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const currentModeState = modeBuildState[selectedMode];
-  const modeReady = currentModeState.status === "ready";
+  const modeReady = modeBuildState.status === "ready";
 
   const handleSend = async (customInput?: string) => {
     await handleQuery(customInput, false);
@@ -113,11 +108,7 @@ export function ChatPanel({
     setIsLoading(true);
 
     try {
-      const queryPath = debugMode
-        ? "/debug/queryHybrid"
-        : selectedMode === "hybrid"
-          ? "/queryHybrid"
-          : "/querySimpleChunking";
+      const queryPath = debugMode ? "/debug/queryHybrid" : "/queryHybrid";
 
       const response = await apiFetch(queryPath, {
         method: "POST",
@@ -207,10 +198,10 @@ export function ChatPanel({
     }
   }, [messages]);
 
+  // We no longer need to reset on mode change since there's only one mode
   useEffect(() => {
-    setMessages([]);
-    setInput("");
-  }, [selectedMode]);
+    // If you want history to clear on manual index rebuild, you can keep this or remove it.
+  }, [modeBuildState.status]);
 
   const suggestedPrompts =
     documentCount > 0
@@ -247,35 +238,12 @@ export function ChatPanel({
               <h2 className="mt-1 text-2xl font-semibold text-zinc-950">AI Assistant</h2>
               <p className="mt-1 text-sm text-zinc-500">
                 {modeReady
-                  ? `Mode ${selectedMode === "hybrid" ? "Hybrid" : "Fixed Chunking"} đã sẵn sàng để hỏi đáp`
-                  : `Bạn đang ở mode ${selectedMode === "hybrid" ? "Hybrid" : "Fixed Chunking"}. Cần build lại index trước khi hỏi.`}
+                  ? `Hệ thống đã sẵn sàng để phân tích tài liệu`
+                  : `Vui lòng tải lên tài liệu và build index để bắt đầu.`}
               </p>
             </div>
           </div>
-
           <div className="hidden items-center gap-2 md:flex">
-            <div className="flex items-center rounded-full border border-zinc-200 bg-white/80 p-1 shadow-sm">
-              <button
-                onClick={() => onModeChange("hybrid")}
-                className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-                  selectedMode === "hybrid"
-                    ? "bg-zinc-950 text-white"
-                    : "text-zinc-600 hover:bg-zinc-100"
-                }`}
-              >
-                Hybrid
-              </button>
-              <button
-                onClick={() => onModeChange("fixed")}
-                className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-                  selectedMode === "fixed"
-                    ? "bg-zinc-950 text-white"
-                    : "text-zinc-600 hover:bg-zinc-100"
-                }`}
-              >
-                Fixed
-              </button>
-            </div>
             <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
               <LibraryBig className="mr-1 size-3.5" />
               {documentCount} tài liệu
@@ -312,20 +280,16 @@ export function ChatPanel({
                   </p>
                 </div>
 
-                <div className="grid gap-3 text-left sm:grid-cols-2 md:w-[22rem] md:grid-cols-1">
                   <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
                     <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Trạng thái</p>
                     <p className="mt-2 text-lg font-semibold text-zinc-950">
-                      {modeReady ? "Context đã sẵn sàng" : "Chờ build index"}
+                      {modeReady ? "Đã sẵn sàng" : "Chờ build index"}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/80 bg-white/75 p-4">
                     <p className="text-xs uppercase tracking-[0.22em] text-zinc-400">Pipeline</p>
-                    <p className="mt-2 text-lg font-semibold text-zinc-950">
-                      {selectedMode === "hybrid" ? "Hybrid Retrieval" : "Fixed Chunking"}
-                    </p>
+                    <p className="mt-2 text-lg font-semibold text-zinc-950">Advanced Hybrid RAG</p>
                   </div>
-                </div>
               </div>
 
               <div className="mt-8 grid gap-3 md:grid-cols-3">
@@ -522,28 +486,6 @@ export function ChatPanel({
         <div className="mx-auto max-w-4xl">
           <div className="relative rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
             <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
-              <div className="flex items-center rounded-full border border-zinc-200 bg-zinc-50 p-1">
-                <button
-                  onClick={() => onModeChange("hybrid")}
-                  className={`rounded-full px-3 py-1 text-xs transition-colors ${
-                    selectedMode === "hybrid"
-                      ? "bg-zinc-950 text-white"
-                      : "text-zinc-600 hover:bg-zinc-100"
-                  }`}
-                >
-                  Hybrid
-                </button>
-                <button
-                  onClick={() => onModeChange("fixed")}
-                  className={`rounded-full px-3 py-1 text-xs transition-colors ${
-                    selectedMode === "fixed"
-                      ? "bg-zinc-950 text-white"
-                      : "text-zinc-600 hover:bg-zinc-100"
-                  }`}
-                >
-                  Fixed
-                </button>
-              </div>
               <Badge className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600 hover:bg-zinc-50">
                 Enter để gửi
               </Badge>
@@ -552,7 +494,7 @@ export function ChatPanel({
               </Badge>
               {documentCount > 0 && (
                 <Badge className="rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50">
-                  Đang dùng {documentCount} tài liệu cho mode {selectedMode}
+                  Đang sử dụng {documentCount} tài liệu phân tích
                 </Badge>
               )}
               {!modeReady && (
@@ -570,7 +512,7 @@ export function ChatPanel({
               placeholder={
                 modeReady
                   ? "Đặt câu hỏi về tài liệu của bạn..."
-                  : `Mode ${selectedMode} chưa sẵn sàng. Hãy build index từ sidebar trước.`
+                  : `Hệ thống chưa sẵn sàng. Hãy build index từ sidebar trước.`
               }
               className="min-h-[120px] max-h-44 rounded-[22px] border-zinc-200/80 bg-zinc-50/70 px-4 py-3 pr-14 text-sm leading-7 shadow-inner"
               disabled={isLoading || !modeReady}
@@ -578,17 +520,15 @@ export function ChatPanel({
 
             <div className="absolute bottom-6 right-6">
               <div className="flex items-center gap-2">
-                {selectedMode === "hybrid" && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDebugSend()}
-                    disabled={!input.trim() || isLoading || !modeReady}
-                    className="h-10 rounded-2xl border-sky-200 bg-sky-50 px-3 text-sky-700 hover:bg-sky-100"
-                  >
-                    Debug
-                  </Button>
-                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDebugSend()}
+                  disabled={!input.trim() || isLoading || !modeReady}
+                  className="h-10 rounded-2xl border-sky-200 bg-sky-50 px-3 text-sky-700 hover:bg-sky-100"
+                >
+                  Debug
+                </Button>
                 <Button
                   size="sm"
                   onClick={() => handleSend()}

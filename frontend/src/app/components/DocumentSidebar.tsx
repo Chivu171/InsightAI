@@ -19,7 +19,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { Badge } from "./ui/badge";
-import type { ChunkingMode, ModeBuildState } from "../App";
+import type { ModeBuildState } from "../App";
 import { apiFetch } from "../api";
 
 export interface Document {
@@ -33,65 +33,52 @@ export interface Document {
 interface DocumentSidebarProps {
   onDocumentsChange?: (documents: Document[]) => void;
   collapsed?: boolean;
-  selectedMode: ChunkingMode;
-  modeBuildState: Record<ChunkingMode, ModeBuildState>;
-  onModeBuildStateChange: Dispatch<SetStateAction<Record<ChunkingMode, ModeBuildState>>>;
+  modeBuildState: ModeBuildState;
+  onModeBuildStateChange: Dispatch<SetStateAction<ModeBuildState>>;
   onToggleCollapse?: () => void;
 }
 
 export function DocumentSidebar({
   onDocumentsChange,
-  selectedMode,
   modeBuildState,
   onModeBuildStateChange,
   onToggleCollapse,
 }: DocumentSidebarProps) {
-  const [documentsByMode, setDocumentsByMode] = useState<Record<ChunkingMode, Document[]>>({
-    hybrid: [],
-    fixed: [],
-  });
-  const [selectedFilesByMode, setSelectedFilesByMode] = useState<Record<ChunkingMode, File[]>>({
-    hybrid: [],
-    fixed: [],
-  });
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const currentModeState = modeBuildState[selectedMode];
-  const indexing = currentModeState.status === "processing";
-  const progress = currentModeState.progress;
-  const indexStatus = currentModeState.status;
-  const documents = documentsByMode[selectedMode];
-  const selectedFiles = selectedFilesByMode[selectedMode];
+  const indexing = modeBuildState.status === "processing";
+  const progress = modeBuildState.progress;
+  const indexStatus = modeBuildState.status;
 
   useEffect(() => {
-    onDocumentsChange?.(documentsByMode[selectedMode]);
-  }, [documentsByMode, onDocumentsChange, selectedMode]);
+    onDocumentsChange?.(documents);
+  }, [documents, onDocumentsChange]);
 
   useEffect(() => {
     if (indexing) {
       pollingRef.current = setInterval(async () => {
         try {
-          const res = await apiFetch(`/progress/${selectedMode}`);
+          const res = await apiFetch(`/progress`);
           const data = await res.json();
+          // Backend returns format: { hybrid: { status, progress } }
+          const hybridData = data.hybrid;
+          if (!hybridData) return;
+
           const normalizedStatus =
-            data.status === "done" ? "ready" : data.status === "processing" ? "processing" : "idle";
+            hybridData.status === "done" ? "ready" : hybridData.status === "processing" ? "processing" : "idle";
 
-          onModeBuildStateChange((prev) => ({
-            ...prev,
-            [selectedMode]: {
-              status: normalizedStatus,
-              progress: data.progress,
-            },
-          }));
+          onModeBuildStateChange({
+            status: normalizedStatus,
+            progress: hybridData.progress,
+          });
 
-          if (data.progress >= 100 || data.status === "done") {
-            onModeBuildStateChange((prev) => ({
-              ...prev,
-              [selectedMode]: {
-                status: "ready",
-                progress: 100,
-              },
-            }));
+          if (hybridData.progress >= 100 || hybridData.status === "done") {
+            onModeBuildStateChange({
+              status: "ready",
+              progress: 100,
+            });
           }
         } catch (err) {
           console.error("Error polling progress:", err);
@@ -102,7 +89,7 @@ export function DocumentSidebar({
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [indexing, onModeBuildStateChange, selectedMode]);
+  }, [indexing, onModeBuildStateChange]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -117,21 +104,12 @@ export function DocumentSidebar({
       uploadedAt: new Date(),
     }));
 
-    setDocumentsByMode((prev) => ({
-      ...prev,
-      [selectedMode]: [...prev[selectedMode], ...newDocuments],
-    }));
-    setSelectedFilesByMode((prev) => ({
-      ...prev,
-      [selectedMode]: [...prev[selectedMode], ...fileList],
-    }));
-    onModeBuildStateChange((prev) => ({
-      ...prev,
-      [selectedMode]: {
-        status: "needs_rebuild",
-        progress: 0,
-      },
-    }));
+    setDocuments((prev) => [...prev, ...newDocuments]);
+    setSelectedFiles((prev) => [...prev, ...fileList]);
+    onModeBuildStateChange({
+      status: "needs_rebuild",
+      progress: 0,
+    });
 
     event.target.value = "";
   };
@@ -139,18 +117,12 @@ export function DocumentSidebar({
   const handleReindex = async () => {
     if (selectedFiles.length === 0 || indexing) return;
 
-    onModeBuildStateChange((prev) => ({
-      ...prev,
-      [selectedMode]: {
-        status: "processing",
-        progress: 0,
-      },
-    }));
+    onModeBuildStateChange({
+      status: "processing",
+      progress: 0,
+    });
 
-    const uploadEndpoint =
-      selectedMode === "hybrid"
-        ? "/uploadHybrid"
-        : "/uploadSimpleChunking";
+    const uploadEndpoint = "/upload";
 
     try {
       for (const file of selectedFiles) {
@@ -168,13 +140,10 @@ export function DocumentSidebar({
       }
     } catch (error) {
       console.error("Error reindexing files:", error);
-      onModeBuildStateChange((prev) => ({
-        ...prev,
-        [selectedMode]: {
-          status: "needs_rebuild",
-          progress: 0,
-        },
-      }));
+      onModeBuildStateChange({
+        status: "needs_rebuild",
+        progress: 0,
+      });
     }
   };
 
@@ -183,21 +152,12 @@ export function DocumentSidebar({
     const updatedDocuments = documents.filter((doc) => doc.id !== id);
     const updatedFiles = selectedFiles.filter((_, index) => index !== removedIndex);
 
-    setDocumentsByMode((prev) => ({
-      ...prev,
-      [selectedMode]: updatedDocuments,
-    }));
-    setSelectedFilesByMode((prev) => ({
-      ...prev,
-      [selectedMode]: updatedFiles,
-    }));
-    onModeBuildStateChange((prev) => ({
-      ...prev,
-      [selectedMode]: {
-        status: updatedDocuments.length > 0 ? "needs_rebuild" : "idle",
-        progress: 0,
-      },
-    }));
+    setDocuments(updatedDocuments);
+    setSelectedFiles(updatedFiles);
+    onModeBuildStateChange({
+      status: updatedDocuments.length > 0 ? "needs_rebuild" : "idle",
+      progress: 0,
+    });
   };
 
   const filteredDocuments = documents.filter((doc) =>
@@ -240,11 +200,7 @@ export function DocumentSidebar({
               </p>
               <h2 className="mt-2 text-xl font-semibold text-zinc-950">Tài liệu</h2>
               <p className="mt-1 text-sm leading-6 text-zinc-600">
-                Chọn tài liệu cho mode{" "}
-                <span className="font-semibold text-zinc-900">
-                  {selectedMode === "hybrid" ? "Hybrid" : "Fixed Chunking"}
-                </span>
-                , sau đó bấm reindex để build lại index.
+                Hãy tải lên tài liệu liên quan đến công việc của bạn, sau đó bấm reindex để hệ thống sẵn sàng phân tích.
               </p>
             </div>
             <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-white/85 text-sky-600 shadow-sm">
@@ -269,13 +225,13 @@ export function DocumentSidebar({
             </div>
           </div>
 
-          <label htmlFor={`file-upload-${selectedMode}`} className="mt-4 block">
+          <label htmlFor={`file-upload`} className="mt-4 block">
             <div className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-zinc-900 transition-transform duration-200 hover:-translate-y-0.5 hover:bg-zinc-50">
               <Upload className="size-4" />
               <span className="text-sm font-medium">Chọn tài liệu</span>
             </div>
             <input
-              id={`file-upload-${selectedMode}`}
+              id={`file-upload`}
               type="file"
               multiple
               accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.csv,image/*"
@@ -294,7 +250,7 @@ export function DocumentSidebar({
             ) : (
               <RefreshCw className="size-4" />
             )}
-            Reindex {selectedMode === "hybrid" ? "Hybrid" : "Fixed"}
+            Reindex ngay
           </Button>
         </div>
 
@@ -305,10 +261,10 @@ export function DocumentSidebar({
                 {indexStatus !== "ready" && (
                   <Loader2 className="size-3.5 animate-spin text-blue-600" />
                 )}
-                <span className="text-xs font-medium text-zinc-700">
+                 <span className="text-xs font-medium text-zinc-700">
                   {indexStatus === "ready"
-                    ? "✅ Mode đã sẵn sàng!"
-                    : `Đang build ${selectedMode === "hybrid" ? "hybrid" : "fixed"} index...`}
+                    ? "✅ Hệ thống đã sẵn sàng!"
+                    : `Đang xây dựng kho tri thức...`}
                 </span>
               </div>
               <span className="text-xs font-semibold text-blue-600">{progress}%</span>
@@ -338,12 +294,8 @@ export function DocumentSidebar({
 
         {indexStatus === "needs_rebuild" && (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/90 p-3 text-xs leading-5 text-amber-900">
-            Mode{" "}
-            <span className="font-semibold">
-              {selectedMode === "hybrid" ? "Hybrid" : "Fixed Chunking"}
-            </span>{" "}
-            đã đổi hoặc danh sách tài liệu đã thay đổi. Hãy bấm <span className="font-semibold">Reindex</span>{" "}
-            trước khi gửi câu hỏi.
+            Danh sách tài liệu đã thay đổi. Hãy bấm <span className="font-semibold">Reindex</span>{" "}
+            trước khi đặt câu hỏi.
           </div>
         )}
 

@@ -4,8 +4,6 @@ import { ChatPanel } from "./components/ChatPanel";
 import { useIsMobile } from "./components/ui/use-mobile";
 import { apiFetch } from "./api";
 
-export type ChunkingMode = "hybrid" | "fixed";
-
 export interface ModeBuildState {
   progress: number;
   status: "idle" | "needs_rebuild" | "processing" | "ready";
@@ -14,10 +12,9 @@ export interface ModeBuildState {
 export default function App() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [selectedMode, setSelectedMode] = useState<ChunkingMode>("hybrid");
-  const [modeBuildState, setModeBuildState] = useState<Record<ChunkingMode, ModeBuildState>>({
-    hybrid: { status: "needs_rebuild", progress: 0 },
-    fixed: { status: "needs_rebuild", progress: 0 },
+  const [modeBuildState, setModeBuildState] = useState<ModeBuildState>({
+    status: "needs_rebuild", 
+    progress: 0 
   });
   const isMobile = useIsMobile();
 
@@ -27,21 +24,12 @@ export default function App() {
     }
   }, [isMobile]);
 
-  const handleModeChange = (nextMode: ChunkingMode) => {
-    if (nextMode === selectedMode) return;
-
-    void Promise.all([
-      apiFetch("/reset/hybrid", { method: "POST" }),
-      apiFetch("/reset/fixed", { method: "POST" }),
-    ]).catch((error) => {
-      console.error("Failed to reset indexes on mode change:", error);
+  const handleReset = () => {
+    apiFetch("/reset", { method: "POST" }).catch((error) => {
+      console.error("Failed to reset index:", error);
     });
 
-    setSelectedMode(nextMode);
-    setModeBuildState({
-      hybrid: { status: "needs_rebuild", progress: 0 },
-      fixed: { status: "needs_rebuild", progress: 0 },
-    });
+    setModeBuildState({ status: "needs_rebuild", progress: 0 });
   };
 
   return (
@@ -63,7 +51,6 @@ export default function App() {
               <DocumentSidebar
                 onDocumentsChange={setDocuments}
                 collapsed={sidebarCollapsed}
-                selectedMode={selectedMode}
                 modeBuildState={modeBuildState}
                 onModeBuildStateChange={setModeBuildState}
                 onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -75,9 +62,7 @@ export default function App() {
             <ChatPanel
               documentCount={documents.length}
               documents={documents}
-              selectedMode={selectedMode}
               modeBuildState={modeBuildState}
-              onModeChange={handleModeChange}
               sidebarCollapsed={sidebarCollapsed}
               onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
@@ -94,7 +79,6 @@ export default function App() {
                 <DocumentSidebar
                   onDocumentsChange={setDocuments}
                   collapsed={sidebarCollapsed}
-                  selectedMode={selectedMode}
                   modeBuildState={modeBuildState}
                   onModeBuildStateChange={setModeBuildState}
                   onToggleCollapse={() => setSidebarCollapsed(true)}
