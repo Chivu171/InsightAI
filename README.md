@@ -101,11 +101,11 @@ To stand out, this project implements several advanced information retrieval tec
 #### **Backend** (`backend/.env`):
 ```env
 # Local LLM (via LM Studio)
-LMSTUDIO_BASE_URL=http://localhost:1234
+LMSTUDIO_BASE_URL=http://127.0.0.1:1234
 LMSTUDIO_MODEL=your-local-model-name
 
 # Fallback (optional)
-# GOOGLE_API_KEY=your-api-key
+GOOGLE_API_KEY=your-api-key  # Required if not using LM Studio
 ```
 
 #### **Frontend** (`frontend/.env`):
