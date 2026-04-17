@@ -136,8 +136,8 @@ npm run dev
 ---
 
 ## 📈 Future Improvements
+- **Structural Chunking**: Moving from flat semantic chunks to structure-aware hierarchy (Sections, Tables, Hierarchical indexing).
+- **Pre-retrieval Optimization**: Implementing Query Expansion (Hypothetical Document Embeddings - HyDE) and Query Decomposition.
+- **Knowledge Graph Integration (GraphRAG)**: Building entity-relationship graphs to enable complex multi-hop reasoning.
 - **Streaming SSR**: Implement Server-Sent Events (SSE) for token-by-token streaming.
-- **Persistence**: Add PostgreSQL/vector-native database (milvus/weaviate) for long-term storage.
-- **Evaluation**: Implement a RAGAS framework for automated retrieval quality testing.
-
 ---
