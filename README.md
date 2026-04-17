@@ -98,11 +98,23 @@ To stand out, this project implements several advanced information retrieval tec
 - (Optional) [LM Studio](https://lmstudio.ai/) running a local model.
 
 ### 2. Setup Environment
-Create `backend/.env`:
+#### **Backend** (`backend/.env`):
 ```env
+# Local LLM (via LM Studio)
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=your-local-model-name
-# GOOGLE_API_KEY=...
+
+# Fallback (optional)
+# GOOGLE_API_KEY=your-api-key
+```
+
+#### **Frontend** (`frontend/.env`):
+```env
+# Backend API Location
+VITE_API_BASE_URL=http://localhost:8000
+
+# Optional: set longer timeout for RAG queries (ms)
+# VITE_API_TIMEOUT_MS=300000
 ```
 
 ### 3. Run with Docker (Recommended)
