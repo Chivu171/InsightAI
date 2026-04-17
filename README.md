@@ -1,74 +1,80 @@
-# InsightAI 🤖 — AI Chatbot with File QA (RAG)
+# InsightAI
 
-InsightAI is a full-stack chatbot that lets you upload a document (PDF/TXT/CSV) and ask questions about its content. It implements a simple session-based chat UX on the frontend and a FastAPI backend with local-first LLM integration and a hybrid RAG pipeline.
+InsightAI is a full-stack RAG chatbot for asking questions over uploaded documents. It includes a FastAPI backend, a React frontend, and a hybrid retrieval pipeline using BM25 + dense FAISS.
 
-## Features (assignment mapping)
-- Chat UI (React/TypeScript) with message history, loading states, and error handling.
-- File upload (PDF/TXT/CSV) and background indexing with progress indicator.
-- AI responses rendered as formatted Markdown (lists, code, math via KaTeX).
-- Ask questions grounded in uploaded file content (citations/snippets returned by the API).
-- Conversation history maintained per `session_id` (within the running backend process).
+## What it supports
 
-## Tech stack
-- Frontend: React 18 + TypeScript + Vite + TailwindCSS.
-- Backend: Python + FastAPI.
-- Parsing: PyMuPDF (PDF), Python `csv` (CSV), UTF-8 text read (TXT). (`.docx` is also supported as an extra.)
-- Retrieval: Hybrid search (BM25 + dense FAISS) with optional reranking.
-- LLM:
-  - Local: LM Studio OpenAI-compatible endpoint (`/v1/chat/completions`) with an open-source model you run locally.
-  - Optional fallback: Google Gemini (only if you set `GOOGLE_API_KEY`).
+- Upload PDF, TXT, CSV, DOCX, and image files
+- Background indexing with progress updates
+- Question answering with citations
+- Session-based chat history per backend process
+- Local-first LLM support with optional Gemini fallback
 
-## API
-- `POST /upload`: upload + trigger (re)index in background
-- `GET /progress`: indexing status/progress
-- `POST /queryHybrid`: chat endpoint (expects `query` and optional `session_id`)
-- `POST /reset`: clears the index
-- `GET /status`: basic health/status
+## Run with Docker
 
-Backend runs on `http://localhost:8000`, frontend on `http://localhost:5173`.
+### Prerequisites
 
-## Setup (local dev)
-Prereqs: Python 3.9+, Node.js 18+
+- Docker Desktop or Docker Engine with Compose support
+- A `backend/.env` file for LLM configuration
 
-### 1) Backend
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\\Scripts\\activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
+### 1) Configure backend env
 
-Create `backend/.env` (local LLM recommended):
+Create `backend/.env`:
+
 ```env
-# Local LLM via LM Studio (OpenAI-compatible)
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=your-local-model-name
 
-# Optional fallback (not required if local LLM is running)
-# GOOGLE_API_KEY=...
+# Optional fallback
+# GOOGLE_API_KEY=your_google_api_key
+# GOOGLE_MODEL=gemini-2.5-flash
 ```
 
-### 2) Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
+If you use Google Gemini, make sure `GOOGLE_API_KEY` is set. If you use a local model through LM Studio, make sure the LM Studio server is running before starting the stack.
 
-## Docker (optional)
-This repo includes `docker-compose.yml` to run `frontend` + `backend`:
+### 2) Build and start
+
 ```bash
 docker compose up --build
 ```
 
-## Architecture decisions & trade-offs
-- Hybrid retrieval (BM25 + dense FAISS): better keyword recall + semantic matching, at the cost of slightly higher retrieval compute.
-- Background indexing: upload triggers a background job; UI polls `/progress` for a responsive UX.
-- Session memory: conversation history is kept in-process (simple + fast), but is lost on backend restart (no DB yet).
+### 3) Open the app
 
-## What I’d improve with more time
-- True streaming responses (SSE/WebSocket) for token-by-token UI.
-- Persist conversations + documents (SQLite/Postgres) and multi-user auth.
-- More robust parsing (tables in PDF/CSV schema awareness) and better citation UX.
-- Tests for endpoints + parsing and a small evaluation harness for retrieval quality.
+- Frontend: [http://localhost:5173](http://localhost:5173)
+- Backend API: [http://localhost:8000](http://localhost:8000)
+
+## Useful endpoints
+
+- `POST /upload` - upload a file and build the index
+- `GET /progress` - indexing progress
+- `POST /queryHybrid` - ask a question
+- `POST /reset` - clear the index
+- `GET /status` - backend status
+
+## Docker layout
+
+- `backend` runs `uvicorn main:app --host 0.0.0.0 --port 8000`
+- `frontend` runs the Vite dev server on `0.0.0.0:5173`
+- Both services use bind mounts for local development
+
+## Notes
+
+- The backend image is built from `backend/Dockerfile`
+- The frontend image is built from `frontend/Dockerfile`
+- `.dockerignore` files are included to keep secrets, caches, and build artifacts out of the images
+
+## Troubleshooting
+
+If the app starts but queries fail, check:
+
+1. `backend/.env` is present and valid
+2. LM Studio or Gemini is reachable
+3. The backend container logs for indexing or model errors
+
+If Docker build fails, try:
+
+```bash
+docker compose build --no-cache
+docker compose logs -f backend
+docker compose logs -f frontend
+```
