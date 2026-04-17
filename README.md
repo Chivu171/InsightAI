@@ -78,16 +78,42 @@ graph TD
 
 ---
 
-## 🧠 Advanced Engineering Decisions
+## 🧠 Architecture Decisions & Trade-offs
 
-To stand out, this project implements several advanced information retrieval techniques:
+This project is built with a focus on **privacy, performance, and transparency**. Every technical choice was made by weighing the pros and cons of modern AI engineering patterns.
 
-1.  **Hybrid Search (BM25 + Dense)**: Combines keyword-based matching with semantic understanding to solve the "vocabulary mismatch" problem.
-2.  **RRF Fusion & Reranking**: Uses Reciprocal Rank Fusion to merge search results and a secondary Reranker to ensure the Top-K chunks are the most relevant.
-3.  **Dynamic Query Classification**: The system detects if a user wants a **Fact** (specific answer) or a **Summary** (overview), routing the request through specialized pipelines.
-4.  **MMR (Maximal Marginal Relevance)**: For summary queries, the system uses MMR to select chunks that are relevant *but diverse*, avoiding redundant info in the final context.
-5.  **TextRank-based Summarization**: Uses a sentence-level Graph algorithm (PageRank style) to extract core sentences before generating the final answer.
-6.  **Conversation Memory**: Implements **Query Rewriting** using session history, allowing the AI to understand pronouns (e.g., "What about its first chapter?") by looking at previous exchanges.
+### 1. **Backend Service: Why FastAPI?**
+*   **Decision**: Use **FastAPI** over Flask or Django.
+*   **Rational**: RAG applications are I/O bound (waiting for embeddings, vector search, and LLM responses). FastAPI’s native **asynchronous (async/await)** support allows handling concurrent requests efficiently without blocking the event loop.
+
+### 2. **Context Retrieval: Why Hybrid Search (BM25 + Dense)?**
+*   **Decision**: Implementing a **Two-Tier Retrieval** system.
+*   **Trade-off**: 
+    *   **Dense (Vector) only**: Great at capturing meaning but often fails at finding specific terms (e.g., product IDs, rare names).
+    *   **Keyword (BM25) only**: Precise for exact matches but misses synonyms.
+*   **Result**: By using **RRF (Reciprocal Rank Fusion)** to merge both, InsightAI achieves high recall and precision, solving the "vocabulary mismatch" problem common in basic RAG.
+
+### 3. **The Local LLM vs. Cloud API Trade-off**
+*   **Decision**: Supporting **LM Studio (Local)** as primary and **Gemini (Cloud)** as fallback.
+*   **Trade-off Analysis**:
+    *   **Local Models (Llama 3 / Qwen)**: 
+        *   *Pros*: Zero cost, data never leaves the machine (GDPR/Privacy friendly), no rate limits.
+        *   *Cons*: Slower without high-end GPUs, reasoning quality is lower than GPT-4o.
+    *   **Cloud Models (Gemini/GPT)**:
+        *   *Pros*: State-of-the-art reasoning, zero infrastructure setup.
+        *   *Cons*: Privacy risks, latency, cost per token.
+*   **Result**: InsightAI gives users the choice, making it a professional-grade "Privacy-First" tool.
+
+### 4. **Chunking Strategy: Recursive vs. Semantic**
+*   **Decision**: Implementing **Semantic Chunking** as the base layer.
+*   **Trade-off**: 
+    *   **Recursive/Fixed-size**: Fast and predictable but often breaks a sentence in the middle, losing context.
+    *   **Semantic**: Breaks text based on "meaning shifts" (using embeddings). 
+*   **Result**: Higher indexing time, but significantly better retrieval accuracy as chunks are more coherent.
+
+### 5. **Summarization Pipeline: Why the Block-based pattern?**
+*   **Decision**: Recursive Retrieval (Small-to-Big pattern) using **Hierarchical Blocks**.
+*   **Trade-off**: Retrieving large blocks directly captures context but hits token limits. Splitting them into chunks and filtering them back via **MMR (Maximal Marginal Relevance)** ensures the LLM receives only the most diverse and high-impact information, avoiding the "lost in the middle" phenomenon.
 
 ---
 
