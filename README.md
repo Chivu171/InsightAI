@@ -113,8 +113,7 @@ LMSTUDIO_MODEL=your-local-model-name
 # Backend API Location
 VITE_API_BASE_URL=http://localhost:8000
 
-# Optional: set longer timeout for RAG queries (ms)
-# VITE_API_TIMEOUT_MS=300000
+
 ```
 
 ### 3. Run with Docker (Recommended)
