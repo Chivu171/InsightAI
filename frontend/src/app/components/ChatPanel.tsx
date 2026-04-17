@@ -56,6 +56,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   citations?: Citation[];
+  debug?: Record<string, unknown>;
 }
 
 interface ChatPanelProps {
@@ -85,8 +86,17 @@ export function ChatPanel({
   const modeReady = currentModeState.status === "ready";
 
   const handleSend = async (customInput?: string) => {
+    await handleQuery(customInput, false);
+  };
+
+  const handleDebugSend = async (customInput?: string) => {
+    await handleQuery(customInput, true);
+  };
+
+  const handleQuery = async (customInput?: string, debugMode = false) => {
     const messageText = customInput || input.trim();
     if (!messageText || isLoading || !modeReady) return;
+    if (debugMode && selectedMode !== "hybrid") return;
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -100,8 +110,9 @@ export function ChatPanel({
     setIsLoading(true);
 
     try {
-      const queryPath =
-        selectedMode === "hybrid"
+      const queryPath = debugMode
+        ? "/debug/queryHybrid"
+        : selectedMode === "hybrid"
           ? "/queryHybrid"
           : "/querySimpleChunking";
 
@@ -133,6 +144,7 @@ export function ChatPanel({
           uploadedAt: source.uploaded_at,
           snippet: source.snippet,
         })),
+        debug: data.debug,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -459,6 +471,14 @@ export function ChatPanel({
                           <RotateCcw className="size-3" />
                           Tạo lại
                         </Button>
+                        {message.debug && (
+                          <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
+                            <p className="mb-2 font-medium text-zinc-900">Debug retrieval</p>
+                            <pre className="overflow-x-auto whitespace-pre-wrap">
+                              {JSON.stringify(message.debug, null, 2)}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -551,14 +571,27 @@ export function ChatPanel({
             />
 
             <div className="absolute bottom-6 right-6">
-              <Button
-                size="sm"
-                onClick={() => handleSend()}
-                disabled={!input.trim() || isLoading || !modeReady}
-                className="size-10 rounded-2xl bg-zinc-950 p-0 hover:bg-zinc-800"
-              >
-                <Send className="size-4" />
-              </Button>
+              <div className="flex items-center gap-2">
+                {selectedMode === "hybrid" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDebugSend()}
+                    disabled={!input.trim() || isLoading || !modeReady}
+                    className="h-10 rounded-2xl border-sky-200 bg-sky-50 px-3 text-sky-700 hover:bg-sky-100"
+                  >
+                    Debug
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => handleSend()}
+                  disabled={!input.trim() || isLoading || !modeReady}
+                  className="size-10 rounded-2xl bg-zinc-950 p-0 hover:bg-zinc-800"
+                >
+                  <Send className="size-4" />
+                </Button>
+              </div>
             </div>
           </div>
         </div>

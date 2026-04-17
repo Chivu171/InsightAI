@@ -13,6 +13,8 @@ from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 import csv
 import io
+import networkx as nx
+from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
 try:
     from langchain_classic.retrievers import ParentDocumentRetriever
@@ -25,7 +27,7 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from document_structurer import DocumentStructurer
+
 
 
 class RAGEngine:
@@ -62,21 +64,19 @@ class RAGEngine:
         self.bm25_index = None
         self.bm25_corpus = []
         self.all_chunks = []
+        self.blocks = []
+        self.block_vectorstore = None
         self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-
-        self.structurer = DocumentStructurer()
-        self.section_vectorstore = None
-        self.section_docs = []
-        self.section_bm25 = None
 
     def clear_index(self):
         self.vectorstore = None
         self.docstore = InMemoryStore()
         self.retriever = None
         self.chunking_mode = None
-        self.bm25_index = None
         self.bm25_corpus = []
         self.all_chunks = []
+        self.blocks = []
+        self.block_vectorstore = None
         self.status = "idle"
         self.progress = 0
 
@@ -396,10 +396,16 @@ Trả lời:
             raise ValueError("No documents available for indexing.")
 
         self.progress = 30
-        if self.vectorstore is None:
-            self.vectorstore = FAISS.from_texts(["initialization"], self.embeddings)
+        parent_docs = self.parent_splitter.split_documents(docs)
+        parent_docs = self._attach_chunk_metadata(parent_docs)
 
         self.progress = 50
+        if self.vectorstore is None:
+            self.vectorstore = FAISS.from_documents([parent_docs[0]], self.embeddings)
+            remaining_docs = parent_docs[1:]
+        else:
+            remaining_docs = parent_docs
+
         self.retriever = ParentDocumentRetriever(
             vectorstore=self.vectorstore,
             docstore=self.docstore,
@@ -408,11 +414,8 @@ Trả lời:
         )
 
         self.progress = 60
-        parent_docs = self.parent_splitter.split_documents(docs)
-        parent_docs = self._attach_chunk_metadata(parent_docs)
-
-        self.progress = 70
-        self.retriever.add_documents(parent_docs)
+        if remaining_docs:
+            self.retriever.add_documents(remaining_docs)
 
         self.all_chunks.extend(parent_docs)
         tokenized = [self._tokenize(doc.page_content) for doc in self.all_chunks]
@@ -424,136 +427,6 @@ Trả lời:
         self.status = "done"
         print(f"[Hybrid] Built BM25 index with {len(self.all_chunks)} chunks")
         return self.vectorstore, parent_docs
-
-    def build_structure_index(self, file_path: str):
-        self.status = "processing"
-        self.progress = 10
-        
-        # 1. Structural Parsing
-        raw_sections = self.structurer.process_file(file_path)
-        self.progress = 30
-        
-        if not raw_sections:
-            raise ValueError("No sections found in the document.")
-
-        # 2. Section Summarization (Enrichment)
-        print(f"[Structure] Summarizing {len(raw_sections)} sections for better routing...")
-        enriched_sections = []
-        for i, sec in enumerate(raw_sections):
-            summary = self._summarize_section(sec.page_content)
-            sec.metadata["section_summary"] = summary
-            # We index a combination of title and summary for the router
-            routing_text = f"Title: {sec.metadata['section_title']}\nSummary: {summary}"
-            enriched_sections.append(Document(page_content=routing_text, metadata=sec.metadata))
-            self.progress = 30 + int((i / len(raw_sections)) * 30)
-        
-        self.section_docs = enriched_sections
-        self.progress = 60
-
-        # 3. Build Section Index (Router - Hybrid)
-        print(f"[Structure] Building hybrid section index...")
-        self.section_vectorstore = FAISS.from_documents(self.section_docs, self.embeddings)
-        section_tokenized = [self._tokenize(doc.page_content) for doc in self.section_docs]
-        self.section_bm25 = BM25Okapi(section_tokenized)
-        
-        # 4. Build Content Index (Chunks)
-        self.progress = 70
-        all_child_chunks = []
-        for sec_doc in raw_sections:
-            chunks = self.child_splitter.split_documents([sec_doc])
-            all_child_chunks.extend(chunks)
-        
-        self.progress = 90
-        self.vectorstore = FAISS.from_documents(all_child_chunks, self.embeddings)
-        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 15})
-        
-        # 5. Global BM25 for chunks
-        self.all_chunks = all_child_chunks
-        self.bm25_corpus = [self._tokenize(doc.page_content) for doc in self.all_chunks]
-        self.bm25_index = BM25Okapi(self.bm25_corpus)
-        
-        self.chunking_mode = "structure"
-        self.progress = 100
-        self.status = "done"
-        print(f"[Structure] Built enhanced hierarchical index with {len(all_child_chunks)} chunks and {len(self.section_docs)} summaries")
-        return self.vectorstore, self.section_vectorstore
-
-    def _summarize_section(self, text: str) -> str:
-        """Uses LLM to generate a 1-sentence summary of the section for routing."""
-        prompt = f"Summarize the following document section in ONE concise sentence for search indexing purposes. Focus on the core topics discussed:\n\n{text[:3000]}"
-        try:
-            # Try Gemini first
-            if self.api_key:
-                summary = self._generate_with_google(prompt)
-                if summary: return summary
-            # Fallback to a truncation of the text
-            return text[:200].replace("\n", " ") + "..."
-        except:
-            return text[:200].replace("\n", " ") + "..."
-
-    def _route_query(self, query: str, k: int = 4) -> List[str]:
-        """
-        Routes the query using Hybrid search (Dense + BM25) on section summaries.
-        """
-        if not self.section_vectorstore or not self.section_bm25:
-            return []
-        
-        # Dense
-        dense_results = self.section_vectorstore.similarity_search(query, k=k)
-        
-        # BM25
-        query_tokens = self._tokenize(query)
-        bm25_scores = self.section_bm25.get_scores(query_tokens)
-        top_bm25_indices = np.argsort(bm25_scores)[::-1][:k]
-        bm25_results = [self.section_docs[i] for i in top_bm25_indices if bm25_scores[i] > 0]
-        
-        # Combine
-        combined = dense_results + bm25_results
-        paths = [doc.metadata.get("section_path") for doc in combined]
-        return list(set(paths))
-
-    def query_with_structure(self, user_query: str, k: int = 5):
-        """
-        Structure-aware query: Route -> Soft Filtering (Boost) -> Generate.
-        """
-        if self.section_vectorstore is None:
-            return self.query(user_query, k=k)
-
-        # 1. Hybrid Routing (Find top 4 sections)
-        relevant_paths = self._route_query(user_query, k=4)
-        print(f"[Structure] Routing query to: {relevant_paths}")
-        
-        # 2. Global Hybrid Retrieval (Get 20 candidates)
-        bm25_results = self._bm25_retrieve(user_query, k=20)
-        dense_results = self._dense_retrieve(user_query, k=20)
-        
-        # 3. Soft Filtering (Scoring Boost)
-        # We manually score chunks: Base Score (Rank) + Boost (if in relevant section)
-        # Deduplicate manually as Document is unhashable
-        seen_content = set()
-        candidates = []
-        for doc in bm25_results + dense_results:
-            if doc.page_content not in seen_content:
-                seen_content.add(doc.page_content)
-                candidates.append(doc)
-
-        scored_candidates = []
-        
-        for doc in candidates:
-            score = 0.0
-            # Boost if the chunk belongs to a routed section
-            if doc.metadata.get("section_path") in relevant_paths:
-                score += 1.0
-            
-            # Additional boost if it's a high-level section match
-            scored_candidates.append((score, doc))
-        
-        # Sort by boost score, then fall back to original similarity (dense_results order)
-        scored_candidates.sort(key=lambda x: x[0], reverse=True)
-        final_results = [doc for score, doc in scored_candidates[:k]]
-
-        # 4. Generate Answer
-        return self._generate_answer_from_docs(user_query, final_results)
 
     def build_fixed_chunk_index(self, text_or_docs, chunk_size=800, overlap=250):
         self.status = "processing"
@@ -581,6 +454,7 @@ Trả lời:
         self.progress = 100
         self.status = "done"
         print(f"[FixedChunking] Built index with {len(self.all_chunks)} fixed chunks")
+        self._create_blocks()
         return self.vectorstore, fixed_chunks
 
     def save_index(self, folder_path="vector_db"):
@@ -599,17 +473,6 @@ Trả lời:
                 },
                 f,
             )
-        
-        # Save section-related data if in structure mode
-        if self.section_vectorstore:
-            section_path = os.path.join(folder_path, "sections")
-            os.makedirs(section_path, exist_ok=True)
-            self.section_vectorstore.save_local(section_path)
-            with open(os.path.join(section_path, "section_data.pkl"), "wb") as f:
-                pickle.dump({
-                    "section_docs": self.section_docs,
-                    "section_bm25": self.section_bm25
-                }, f)
         
         # Save config
         with open(os.path.join(folder_path, "config.pkl"), "wb") as f:
@@ -651,20 +514,6 @@ Trả lời:
             self.bm25_corpus = data["bm25_corpus"]
             self.bm25_index = BM25Okapi(self.bm25_corpus)
 
-        # Load section-related data if exists
-        section_path = os.path.join(folder_path, "sections")
-        if os.path.exists(os.path.join(section_path, "index.faiss")):
-            self.section_vectorstore = FAISS.load_local(
-                section_path,
-                self.embeddings,
-                allow_dangerous_deserialization=True
-            )
-            with open(os.path.join(section_path, "section_data.pkl"), "rb") as f:
-                sec_data = pickle.load(f)
-                self.section_docs = sec_data["section_docs"]
-                self.section_bm25 = sec_data["section_bm25"]
-            print(f"[Load] Section indexes restored.")
-
         # Load config
         config_path = os.path.join(folder_path, "config.pkl")
         if os.path.exists(config_path):
@@ -682,14 +531,13 @@ Trả lời:
             return []
 
         query_tokens = self._tokenize(query)
+        if not query_tokens:
+            return []
+
         scores = self.bm25_index.get_scores(query_tokens)
         top_indices = np.argsort(scores)[::-1][:k]
 
-        results = []
-        for idx in top_indices:
-            if scores[idx] > 0:
-                results.append(self.all_chunks[idx])
-        return results
+        return [self.all_chunks[idx] for idx in top_indices]
 
     def _dense_retrieve(self, query: str, k: int = 10) -> list[Document]:
         if self.retriever is None:
@@ -700,6 +548,181 @@ Trả lời:
         except Exception as e:
             print(f"[Hybrid] Dense retrieval error: {e}")
             return []
+
+    def _classify_query(self, query: str) -> str:
+        """Classifies the query as 'fact' or 'summary' using keywords and LLM."""
+        summary_keywords = [
+            "tóm tắt", "ý chính", "nội dung chính", "bài nói về gì", "vấn đề chính",
+            "main idea", "overview", "summary", "important points", "ngắn gọn", "bao quát"
+        ]
+        
+        query_lower = query.lower()
+        if any(kw in query_lower for kw in summary_keywords):
+            return "summary"
+
+        prompt = f"""Phân loại câu hỏi sau thành 1 trong 2 loại: 'fact' hoặc 'summary'.
+- 'fact': Câu hỏi tra cứu thông tin cụ thể, con số, định nghĩa, sự kiện đơn lẻ.
+- 'summary': Câu hỏi yêu cầu tóm tắt, lấy ý chính, cái nhìn tổng quan, so sánh giữa các phần.
+
+Chỉ trả về duy nhất 1 từ 'fact' hoặc 'summary'.
+
+Câu hỏi: {query}
+Trả lời:"""
+        # Try LM Studio first, then Google
+        try:
+            if self.local_base_url and self.local_model:
+                res = self._generate_with_lmstudio(prompt).strip().lower()
+                if "summary" in res: return "summary"
+                if "fact" in res: return "fact"
+        except:
+            pass
+
+        try:
+            if self.api_key:
+                res = self._generate_with_google(prompt).strip().lower()
+                if "summary" in res: return "summary"
+                return "fact"
+        except:
+            pass
+
+        return "fact"
+
+    def _mmr_select(self, query_embedding, docs, k=5, lambda_val=0.5):
+        """Maximal Marginal Relevance selection for diversity enrichment."""
+        if not docs:
+            return []
+        if len(docs) <= k:
+            return docs
+        
+        doc_embeddings = self.embeddings.embed_documents([d.page_content for d in docs])
+        query_embedding = np.array(query_embedding)
+        doc_embeddings = np.array(doc_embeddings)
+        
+        # Normalize for cosine similarity
+        query_embedding = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
+        doc_embeddings = doc_embeddings / (np.linalg.norm(doc_embeddings, axis=1, keepdims=True) + 1e-10)
+        
+        selected_indices = []
+        candidate_indices = list(range(len(docs)))
+        
+        # Similarities to query
+        similarities_to_query = np.dot(doc_embeddings, query_embedding)
+        
+        # Pick the first one (most relevant)
+        best_idx = np.argmax(similarities_to_query)
+        selected_indices.append(best_idx)
+        candidate_indices.remove(best_idx)
+        
+        while len(selected_indices) < k and candidate_indices:
+            best_mmr = -float('inf')
+            best_idx = -1
+            
+            # Calculate similarity to selected set (diversity penalty)
+            # similarities_to_selected[i] = max similarity of doc i to any doc already in selected
+            for idx in candidate_indices:
+                # Similarity to selected docs
+                div_penalty = max([np.dot(doc_embeddings[idx], doc_embeddings[s]) for s in selected_indices])
+                
+                mmr_score = lambda_val * similarities_to_query[idx] - (1 - lambda_val) * div_penalty
+                
+                if mmr_score > best_mmr:
+                    best_mmr = mmr_score
+                    best_idx = idx
+            
+            if best_idx == -1:
+                break
+                
+            selected_indices.append(best_idx)
+            candidate_indices.remove(best_idx)
+            
+        return [docs[i] for i in selected_indices]
+
+    def _textrank_mmr_summarize(self, chunks: list[Document], k: int = 12, lambda_val: float = 0.7) -> str:
+        """
+        Refines retrieved context by selecting top sentences using TextRank (relevance) 
+        and MMR (diversity).
+        """
+        if not chunks:
+            return ""
+        
+        # 1. Split into sentences
+        raw_text = "\n".join([c.page_content for c in chunks])
+        # Simple sentence splitter
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', raw_text) if len(s.strip()) > 20]
+        
+        if len(sentences) <= k:
+            return "\n".join(sentences)
+            
+        # 2. Embed sentences
+        embeddings = np.array(self.embeddings.embed_documents(sentences))
+        
+        # 3. TextRank (PageRank on similarity matrix)
+        sim_matrix = sklearn_cosine_similarity(embeddings)
+        # Build graph
+        nx_graph = nx.from_numpy_array(sim_matrix)
+        try:
+            scores = nx.pagerank(nx_graph, max_iter=200)
+        except:
+            # Fallback to sum of similarities if PageRank fails to converge
+            scores = {i: sum(sim_matrix[i]) for i in range(len(sentences))}
+            
+        # 4. MMR Selection
+        selected_indices = []
+        candidate_indices = list(range(len(sentences)))
+        
+        # Normalize scores
+        max_score = max(scores.values()) if scores.values() else 1.0
+        norm_scores = {i: s / max_score for i, s in scores.items()}
+        
+        while len(selected_indices) < k and candidate_indices:
+            best_mmr_score = -float('inf')
+            best_idx = -1
+            
+            for idx in candidate_indices:
+                relevance = norm_scores[idx]
+                
+                if not selected_indices:
+                    diversity = 0.0
+                else:
+                    diversity = max([sim_matrix[idx][s] for s in selected_indices])
+                
+                mmr_score = lambda_val * relevance - (1 - lambda_val) * diversity
+                
+                if mmr_score > best_mmr_score:
+                    best_mmr_score = mmr_score
+                    best_idx = idx
+            
+            if best_idx == -1: break
+            selected_indices.append(best_idx)
+            candidate_indices.remove(best_idx)
+            
+        return "\n".join([sentences[i] for i in selected_indices])
+
+    @staticmethod
+    def _doc_debug_label(doc: Document, max_len: int = 120) -> str:
+        metadata = doc.metadata or {}
+        label_bits = []
+        chunk_id = metadata.get("chunk_id")
+        if chunk_id:
+            label_bits.append(str(chunk_id))
+        section_path = metadata.get("section_path")
+        if section_path:
+            label_bits.append(str(section_path))
+        page = metadata.get("page")
+        if page is not None:
+            label_bits.append(f"p{page}")
+        prefix = " | ".join(label_bits)
+        snippet = " ".join(doc.page_content.split())[:max_len]
+        return f"{prefix}: {snippet}" if prefix else snippet
+
+    def _log_retrieval_stage(self, stage: str, docs: list[Document], query: str, limit: int = 5) -> None:
+        if not docs:
+            print(f"[Retrieval:{stage}] no results for query={query!r}")
+            return
+
+        print(f"[Retrieval:{stage}] top {min(limit, len(docs))} for query={query!r}")
+        for idx, doc in enumerate(docs[:limit], start=1):
+            print(f"  {idx}. {self._doc_debug_label(doc)}")
 
     @staticmethod
     def _rrf_fusion(
@@ -755,11 +778,163 @@ Trả lời:
         if self.retriever is None and not self.load_index():
             return "Chua co du lieu. Vui long tai file va index truoc.", []
 
+        # 1. Classification
+        q_type = self._classify_query(user_query)
+        print(f"[Query] Detected type: {q_type}")
+
+        if q_type == "summary":
+            # WAY B: Block-based summary retrieval (generalized)
+            if self.block_vectorstore:
+                print("[Query:Summary] Using Block-based retrieval...")
+                # Tier 1: Block-level retrieval (large context)
+                # We retrieve 3-5 largest blocks to cover a wide range
+                relevant_blocks = self.block_vectorstore.similarity_search(user_query, k=4)
+                
+                # Tier 2: Get child chunks from these blocks for diversity
+                candidate_chunks = []
+                seen_ids = set()
+                for block in relevant_blocks:
+                    child_ids = block.metadata.get("child_chunk_ids", [])
+                    # Finding child documents from all_chunks by ID
+                    for cid in child_ids:
+                        if cid not in seen_ids:
+                            # Map ID to chunk (this is slightly slow but robust)
+                            for chunk in self.all_chunks:
+                                if chunk.metadata.get("chunk_id") == cid:
+                                    candidate_chunks.append(chunk)
+                                    seen_ids.add(cid)
+                                    break
+                
+                # Apply MMR for diversity within the candidates to pick the best 'k+4' chunks
+                query_embedding = self.embeddings.embed_query(user_query)
+                diverse_chunks = self._mmr_select(query_embedding, candidate_chunks, k=k+4, lambda_val=0.4)
+                
+                return self._generate_summary_from_chunks(user_query, diverse_chunks)
+            else:
+                # Fallback to standard MMR if blocks are not available
+                print("[Query:Summary:Fallback] Using standard MMR + TextRank...")
+                bm25_results = self._bm25_retrieve(user_query, k=20)
+                dense_results = self._dense_retrieve(user_query, k=20)
+                fused = self._rrf_fusion([bm25_results, dense_results], k=20)
+                query_embedding = self.embeddings.embed_query(user_query)
+                diverse_chunks = self._mmr_select(query_embedding, fused, k=k+6)
+                
+                return self._generate_summary_from_chunks(user_query, diverse_chunks)
+        else:
+            # Standard Pipeline for fact-checking
+            bm25_results = self._bm25_retrieve(user_query, k=k * 5)
+            dense_results = self._dense_retrieve(user_query, k=k * 5)
+            fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
+            final_results = self._rerank(user_query, fused_results, top_k=k)
+            print(f"[Query:Fact] Selected {len(final_results)} reranked chunks")
+
+        return self._generate_answer_from_docs(user_query, final_results)
+
+    def _generate_summary_from_chunks(self, user_query: str, chunks: list[Document], k_sentences: int = 15):
+        """Helper to run TextRank + MMR and generate final summary response."""
+        print(f"[SummaryEngine] Refining {len(chunks)} chunks into {k_sentences} gold sentences...")
+        refined_context = self._textrank_mmr_summarize(chunks, k=k_sentences)
+        
+        prompt = f"Dựa vào các ý chính được trích xuất dưới đây, hãy viết một bản tóm tắt đầy đủ, sâu sắc và mạch lạc cho câu hỏi: '{user_query}'\n\nÝ chính nội dung:\n{refined_context}"
+        
+        try:
+            if self.local_base_url and self.local_model:
+                answer = self._generate_with_lmstudio(prompt)
+            else:
+                answer = self._generate_with_google(prompt)
+            return answer, self._build_citations(chunks)
+        except:
+            # Final fallback
+            return self._generate_answer_from_docs(user_query, chunks)
+
+    def debug_query(self, user_query, k=3):
+        if self.retriever is None and not self.load_index():
+            return {
+                "answer": "Chua co du lieu. Vui long tai file va index truoc.",
+                "sources": [],
+                "debug": {},
+            }
+
+        q_type = self._classify_query(user_query)
+        
+        if q_type == "summary":
+            # For debug, we run the logic but capture stages
+            if self.block_vectorstore:
+                relevant_blocks = self.block_vectorstore.similarity_search(user_query, k=4)
+                candidate_chunks = []
+                seen_ids = set()
+                for block in relevant_blocks:
+                    for cid in block.metadata.get("child_chunk_ids", []):
+                        if cid not in seen_ids:
+                            for chunk in self.all_chunks:
+                                if chunk.metadata.get("chunk_id") == cid:
+                                    candidate_chunks.append(chunk)
+                                    seen_ids.add(cid)
+                                    break
+                q_emb = self.embeddings.embed_query(user_query)
+                diverse_chunks = self._mmr_select(q_emb, candidate_chunks, k=k+4, lambda_val=0.4)
+                refined_context = self._textrank_mmr_summarize(diverse_chunks, k=15)
+                
+                answer, citations = self._generate_summary_from_chunks(user_query, diverse_chunks)
+                
+                return {
+                    "answer": answer,
+                    "sources": citations,
+                    "debug": {
+                        "query_type": "summary",
+                        "method": "block-based",
+                        "blocks_retrieved": len(relevant_blocks),
+                        "candidate_chunks": len(candidate_chunks),
+                        "diverse_chunks": len(diverse_chunks),
+                        "refined_sentences": refined_context.count("\n") + 1,
+                        "textrank_context_preview": refined_context[:500] + "..."
+                    }
+                }
+            else:
+                # Fallback debug
+                bm25 = self._bm25_retrieve(user_query, k=20)
+                dense = self._dense_retrieve(user_query, k=20)
+                fused = self._rrf_fusion([bm25, dense], k=20)
+                q_emb = self.embeddings.embed_query(user_query)
+                diverse_chunks = self._mmr_select(q_emb, fused, k=k+6)
+                refined = self._textrank_mmr_summarize(diverse_chunks, k=15)
+                answer, citations = self._generate_summary_from_chunks(user_query, diverse_chunks)
+                
+                return {
+                    "answer": answer,
+                    "sources": citations,
+                    "debug": {
+                        "query_type": "summary",
+                        "method": "fallback-mmr",
+                        "fusion_count": len(fused),
+                        "diverse_chunks": len(diverse_chunks),
+                        "refined_sentences": refined.count("\n") + 1
+                    }
+                }
+
+        # Standard Fact debug
         bm25_results = self._bm25_retrieve(user_query, k=k * 5)
         dense_results = self._dense_retrieve(user_query, k=k * 5)
         fused_results = self._rrf_fusion([bm25_results, dense_results], k=k * 3)
         reranked_results = self._rerank(user_query, fused_results, top_k=k)
-        return self._generate_answer_from_docs(user_query, reranked_results)
+
+        self._log_retrieval_stage("bm25", bm25_results, user_query)
+        self._log_retrieval_stage("dense", dense_results, user_query)
+        self._log_retrieval_stage("fusion", fused_results, user_query)
+        self._log_retrieval_stage("rerank", reranked_results, user_query)
+
+        answer, sources = self._generate_answer_from_docs(user_query, reranked_results)
+        return {
+            "answer": answer,
+            "sources": sources,
+            "debug": {
+                "query_type": "fact",
+                "bm25_count": len(bm25_results),
+                "dense_count": len(dense_results),
+                "fusion_count": len(fused_results),
+                "rerank_count": len(reranked_results),
+            },
+        }
 
     def query_fixed_chunking(self, user_query, k=3):
         if self.retriever is None or self.chunking_mode != "fixed":

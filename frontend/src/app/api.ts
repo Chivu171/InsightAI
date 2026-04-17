@@ -24,6 +24,7 @@ const joinUrl = (baseUrl: string, path: string) => {
 
 const DEFAULT_TIMEOUT_MS_REMOTE = 2500;
 const DEFAULT_TIMEOUT_MS_LOCAL = 100000;
+const LONG_RUNNING_TIMEOUT_MS_LOCAL = 20 * 60 * 1000;
 
 const isLocalBaseUrl = (baseUrl: string) =>
   baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
@@ -32,6 +33,19 @@ const getTimeoutMs = (baseUrl: string) => {
   const fromEnv = envTimeoutMs ? Number(envTimeoutMs) : NaN;
   if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
   return isLocalBaseUrl(baseUrl) ? DEFAULT_TIMEOUT_MS_LOCAL : DEFAULT_TIMEOUT_MS_REMOTE;
+};
+
+const getRequestTimeoutMs = (baseUrl: string, path: string) => {
+  if (!isLocalBaseUrl(baseUrl)) return getTimeoutMs(baseUrl);
+
+  const normalizedPath = path.toLowerCase();
+  const isLongRunningEndpoint =
+    normalizedPath.startsWith("/query") ||
+    normalizedPath.startsWith("/debug/query") ||
+    normalizedPath.startsWith("/upload") ||
+    normalizedPath.startsWith("/reset");
+
+  return isLongRunningEndpoint ? LONG_RUNNING_TIMEOUT_MS_LOCAL : getTimeoutMs(baseUrl);
 };
 
 const fetchWithTimeout = async (url: string, init: RequestInit | undefined, timeoutMs: number) => {
@@ -57,7 +71,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     const url = joinUrl(baseUrl, path);
 
     try {
-      const res = await fetchWithTimeout(url, init, getTimeoutMs(baseUrl));
+      const res = await fetchWithTimeout(url, init, getRequestTimeoutMs(baseUrl, path));
 
       if (res.ok) return res;
 
