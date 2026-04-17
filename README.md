@@ -1,94 +1,74 @@
-# InsightAI 🤖 - Intelligent Document RAG Assistant
+# InsightAI 🤖 — AI Chatbot with File QA (RAG)
 
-InsightAI is a full-stack Retrieval-Augmented Generation (RAG) application that allows users to upload documents (PDF, CSV, TXT) and have intelligent conversations with their content.
+InsightAI is a full-stack chatbot that lets you upload a document (PDF/TXT/CSV) and ask questions about its content. It implements a simple session-based chat UX on the frontend and a FastAPI backend with local-first LLM integration and a hybrid RAG pipeline.
 
----
+## Features (assignment mapping)
+- Chat UI (React/TypeScript) with message history, loading states, and error handling.
+- File upload (PDF/TXT/CSV) and background indexing with progress indicator.
+- AI responses rendered as formatted Markdown (lists, code, math via KaTeX).
+- Ask questions grounded in uploaded file content (citations/snippets returned by the API).
+- Conversation history maintained per `session_id` (within the running backend process).
 
-## 🛠️ Tech Stack & Engineering Choices
+## Tech stack
+- Frontend: React 18 + TypeScript + Vite + TailwindCSS.
+- Backend: Python + FastAPI.
+- Parsing: PyMuPDF (PDF), Python `csv` (CSV), UTF-8 text read (TXT). (`.docx` is also supported as an extra.)
+- Retrieval: Hybrid search (BM25 + dense FAISS) with optional reranking.
+- LLM:
+  - Local: LM Studio OpenAI-compatible endpoint (`/v1/chat/completions`) with an open-source model you run locally.
+  - Optional fallback: Google Gemini (only if you set `GOOGLE_API_KEY`).
 
-### **Frontend**
-- **Framework**: **React 18** with **TypeScript**.
-- **Build Tool**: **Vite** (for fast development and optimized production builds).
-- **Styling**: **TailwindCSS** (for a modern, responsive UI).
-- **Feature Set**: Chat interface, session-based message history, file upload management, and real-time loading states.
+## API
+- `POST /upload`: upload + trigger (re)index in background
+- `GET /progress`: indexing status/progress
+- `POST /queryHybrid`: chat endpoint (expects `query` and optional `session_id`)
+- `POST /reset`: clears the index
+- `GET /status`: basic health/status
 
-### **Backend**
-- **Framework**: **FastAPI** (Python). Chosen for its high performance, asynchronous support, and automatic OpenAPI documentation.
-- **File Parsing**: 
-    - **PDF**: `PyMuPDF (fitz)` - Chosen for its speed and superior accuracy in extracting text compared to PyPDF2.
-    - **CSV**: Native `csv` library with `io.StringIO` for row-based document transformation.
-    - **TXT**: Standard UTF-8 decoding and cleaning.
-- **RAG Engine**:
-    - **Orchestration**: Custom implementation focusing on Hybrid Search.
-    - **Vector DB**: **FAISS** (Facebook AI Similarity Search) for efficient local similarity search.
-    - **Keyword Search**: **BM25 (rank_bm25)** for robust term-based retrieval.
+Backend runs on `http://localhost:8000`, frontend on `http://localhost:5173`.
 
-### **LLM & Embeddings**
-- **LLM**: **Google Gemini 1.5/2.0 Flash** (via API) or **Local LLMs** (via LM Studio/Ollama provider).
-- **Embeddings**: `BAAI/bge-small-en-v1.5` - Provides a great balance between embedding speed and retrieval accuracy.
-- **Reranker**: `cross-encoder/ms-marco-MiniLM-L-6-v2` - Used for fine-tuning the top-k results in the Fact-Checking pipeline.
+## Setup (local dev)
+Prereqs: Python 3.9+, Node.js 18+
 
----
-
-## 🏗️ Architecture Decisions & Trade-offs
-
-### 1. **Hybrid Retrieval (BM25 + Dense Search)**
-- **Why**: Traditional vector search often misses specific keywords or technical jargon. By combining BM25 with Semantic Search via **Reciprocal Rank Fusion (RRF)**, the system ensures robustness and precision.
-- **Trade-off**: Higher latency during retrieval, which we mitigated by using `faiss-cpu` for extremely fast vector operations.
-
-### 2. **Dual-Path Routing: Fact vs. Summary**
-- **Decision**: The system automatically classifies queries. 
-    - **Fact queries** use high-granularity chunks for precision.
-    - **Summary queries** use a dedicated **Block-based pipeline** (Large context chunks + TextRank + MMR).
-- **Why**: Summarizing based on tiny 200-character chunks often leads to loss of information context. Blocks provide the "Full Story" to the LLM.
-
-### 3. **TextRank + MMR Refinement**
-- **Decision**: Instead of feeding 4000+ words to the LLM, we use TextRank to identify important sentences and **Maximal Marginal Relevance (MMR)** to ensure those sentences cover diverse topics without redundancy.
-- **Trade-off**: Increases computation time on the backend but significantly reduces LLM input tokens and prevents "hallucinations" caused by information overload.
-
----
-
-## 🚀 Setup Instructions
-
-### **1. Prerequisites**
-- Python 3.9+
-- Node.js 18+
-
-### **2. Backend Setup**
+### 1) Backend
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\\Scripts\\activate
 pip install -r requirements.txt
-```
-Create a `.env` file in `backend/`:
-```env
-GOOGLE_API_KEY=your_key_here
-# Optional for local LLM:
-LMSTUDIO_BASE_URL=http://localhost:1234
-```
-Start server:
-```bash
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8000
 ```
 
-### **3. Frontend Setup**
+Create `backend/.env` (local LLM recommended):
+```env
+# Local LLM via LM Studio (OpenAI-compatible)
+LMSTUDIO_BASE_URL=http://localhost:1234
+LMSTUDIO_MODEL=your-local-model-name
+
+# Optional fallback (not required if local LLM is running)
+# GOOGLE_API_KEY=...
+```
+
+### 2) Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Open `http://localhost:5173` in your browser.
 
----
+## Docker (optional)
+This repo includes `docker-compose.yml` to run `frontend` + `backend`:
+```bash
+docker compose up --build
+```
 
-## 🔮 What I would improve with more time
+## Architecture decisions & trade-offs
+- Hybrid retrieval (BM25 + dense FAISS): better keyword recall + semantic matching, at the cost of slightly higher retrieval compute.
+- Background indexing: upload triggers a background job; UI polls `/progress` for a responsive UX.
+- Session memory: conversation history is kept in-process (simple + fast), but is lost on backend restart (no DB yet).
 
-1. **Persistent Conversation History**: Currently, history is maintained in the frontend session. Moving this to a database (e.g., SQLite/PostgreSQL) would allow users to resume chats across devices.
-2. **Streaming Responses**: implementing Server-Sent Events (SSE) to stream AI responses word-by-word for a better user experience.
-3. **Dockerization**: Providing a `docker-compose.yml` to spin up the entire stack with a single command.
-4. **Graph-RAG Integration**: For extremely complex documents, building a Knowledge Graph would allow the system to answer questions that require multi-hop reasoning better than standard vector search.
-5. **Evaluation Pipeline**: Implementing a system like RAGAS to measure faithfulness and relevance quantitatively.
-
----
-Built as a technical assignment for **ActiveFence**.
+## What I’d improve with more time
+- True streaming responses (SSE/WebSocket) for token-by-token UI.
+- Persist conversations + documents (SQLite/Postgres) and multi-user auth.
+- More robust parsing (tables in PDF/CSV schema awareness) and better citation UX.
+- Tests for endpoints + parsing and a small evaluation harness for retrieval quality.

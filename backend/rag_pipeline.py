@@ -51,7 +51,8 @@ class RAGEngine:
 
         self.embedding_model_name = os.getenv("EMBEDDING_MODEL", model_name)
         self.local_model = os.getenv("LMSTUDIO_MODEL")
-        self.local_base_url = os.getenv("LMSTUDIO_BASE_URL").rstrip("/")
+        lmstudio_base_url = os.getenv("LMSTUDIO_BASE_URL")
+        self.local_base_url = lmstudio_base_url.rstrip("/") if lmstudio_base_url else ""
 
         self.embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model_name)
         self.vectorstore = None

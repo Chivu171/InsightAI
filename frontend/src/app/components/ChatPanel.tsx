@@ -94,7 +94,7 @@ export function ChatPanel({
   const handleQuery = async (customInput?: string, debugMode = false) => {
     const messageText = customInput || input.trim();
     if (!messageText || isLoading || !modeReady) return;
-    if (debugMode && selectedMode !== "hybrid") return;
+    // Single-mode UI: debug is always for the hybrid pipeline.
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,

@@ -1,43 +1,35 @@
-# InsightAI 🤖
+# InsightAI Backend (FastAPI)
 
-InsightAI is a Retrieval-Augmented Generation (RAG) system designed to help researchers and students interact with their academic documents.
+FastAPI service that powers InsightAI:
+- Upload a file (PDF/TXT/CSV) and build an index in the background
+- Chat endpoint for asking questions grounded in the uploaded content
+- Session-based conversation context (`session_id`) stored in-memory
 
-## 🚀 Features
-- **Semantic Search**: Uses `sentence-transformers` to find the most relevant context.
-- **Efficient Indexing**: Powered by FAISS for lightning-fast retrieval.
-- **Intelligent Answers**: (In Progress) Connects to LLMs to generate grounded responses.
-- **Easy Interface**: (Planned) Simple Web UI for document interaction.
+## Endpoints
+- `POST /upload` (alias: `POST /uploadHybrid`): upload + start indexing
+- `GET /progress`: returns `{ status, progress }` (and a `hybrid` key for FE compatibility)
+- `POST /queryHybrid`: `{ query, session_id? }` → `{ answer, sources }`
+- `POST /debug/queryHybrid`: same as query + debug stages
+- `POST /reset`: clears index
+- `GET /status`: health/status
 
-## 🛠️ Tech Stack
-- **Language**: Python 3.9+
-- **Embeddings**: `sentence-transformers/all-MiniLM-L6-v2`
-- **Vector DB**: `faiss-cpu`
-- **LLM**: (TBD) OpenAI / Local Llama
+## Setup
+Prereqs: Python 3.9+
 
-## 📦 Setup
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\\Scripts\\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/Chivu171/InsightAI.git
-   cd InsightAI
-   ```
+## LLM configuration
+Local-first via LM Studio (recommended). Create `backend/.env`:
+```env
+LMSTUDIO_BASE_URL=http://localhost:1234
+LMSTUDIO_MODEL=your-local-model-name
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Run the pipeline**:
-   ```bash
-   python rag_pipeline.py
-   ```
-
-## 📖 How it Works
-1. **Ingestion**: Reads text files from the `data/` folder.
-2. **Chunking**: Splits large texts into 200-character segments with 50-character overlap.
-3. **Embedding**: Converts text into numerical vectors.
-4. **Retrieval**: Finds the most similar chunks when you ask a question.
-5. **Generation**: (Coming Soon) Uses the retrieved context to generate a final answer.
-
----
-Built with ❤️ by Chivu171
+# Optional fallback
+# GOOGLE_API_KEY=...
+```
