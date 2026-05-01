@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from rag.engine import RAGEngine
@@ -37,7 +37,13 @@ async def get_status():
     }
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+async def upload_file(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+    chunking_mode: str = Query("semantic"),
+    chunk_size: int = Query(500),
+    chunk_overlap: int = Query(100),
+):    
     try:
         documents = rag_engine.extract_documents(file)
         if not documents:
@@ -45,7 +51,11 @@ async def upload_file(file: UploadFile = File(...), background_tasks: Background
 
         def process():
             rag_engine.clear_index()
-            rag_engine.build_index(documents)
+            rag_engine.build_index(
+                documents,
+                chunking_mode=chunking_mode,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,)
             rag_engine.save_index()
 
         background_tasks.add_task(process)
@@ -53,10 +63,6 @@ async def upload_file(file: UploadFile = File(...), background_tasks: Background
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/uploadHybrid")
-async def upload_hybrid_alias(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    """Alias for backward compatibility"""
-    return await upload_file(file=file, background_tasks=background_tasks)
 
 
 @app.get("/progress")

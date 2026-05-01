@@ -2,11 +2,18 @@ import { useEffect, useState } from "react";
 import { DocumentSidebar, Document } from "./components/DocumentSidebar";
 import { ChatPanel } from "./components/ChatPanel";
 import { useIsMobile } from "./components/ui/use-mobile";
+import { Toaster } from "./components/ui/sonner";
 import { apiFetch } from "./api";
 
 export interface ModeBuildState {
   progress: number;
   status: "idle" | "needs_rebuild" | "processing" | "ready";
+}
+
+export interface ChunkingConfig {
+  mode: "semantic" | "fixed";
+  chunkSize: number;
+  chunkOverlap: number;
 }
 
 export default function App() {
@@ -15,6 +22,11 @@ export default function App() {
   const [modeBuildState, setModeBuildState] = useState<ModeBuildState>({
     status: "needs_rebuild", 
     progress: 0 
+  });
+  const [chunkingConfig, setChunkingConfig] = useState<ChunkingConfig>({
+    mode: "fixed",
+    chunkSize: 600,
+    chunkOverlap: 120,
   });
   const isMobile = useIsMobile();
 
@@ -34,6 +46,7 @@ export default function App() {
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.22),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(245,158,11,0.16),_transparent_24%),linear-gradient(160deg,_#fffdf8_0%,_#f7f8fc_48%,_#eef4ff_100%)] text-zinc-950">
+      <Toaster richColors position="top-right" />
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute left-[8%] top-[10%] h-40 w-40 rounded-full bg-sky-200/40 blur-3xl" />
         <div className="absolute bottom-[12%] right-[10%] h-52 w-52 rounded-full bg-amber-200/40 blur-3xl" />
@@ -49,13 +62,15 @@ export default function App() {
               style={{ overflow: sidebarCollapsed ? "hidden" : "visible" }}
             >
               <DocumentSidebar
-                onDocumentsChange={setDocuments}
-                collapsed={sidebarCollapsed}
-                modeBuildState={modeBuildState}
-                onModeBuildStateChange={setModeBuildState}
-                onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-              />
-            </div>
+              onDocumentsChange={setDocuments}
+              collapsed={sidebarCollapsed}
+              modeBuildState={modeBuildState}
+              onModeBuildStateChange={setModeBuildState}
+              chunkingConfig={chunkingConfig}
+              onChunkingConfigChange={setChunkingConfig}
+              onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+            />
+          </div>
           )}
 
           <div className="min-w-0 flex-1">
@@ -77,13 +92,15 @@ export default function App() {
               />
               <div className="absolute inset-y-0 left-0 z-30 w-[88vw] max-w-sm border-r border-zinc-200/80 bg-white/92 shadow-2xl backdrop-blur-xl">
                 <DocumentSidebar
-                  onDocumentsChange={setDocuments}
-                  collapsed={sidebarCollapsed}
-                  modeBuildState={modeBuildState}
-                  onModeBuildStateChange={setModeBuildState}
-                  onToggleCollapse={() => setSidebarCollapsed(true)}
-                />
-              </div>
+                onDocumentsChange={setDocuments}
+                collapsed={sidebarCollapsed}
+                modeBuildState={modeBuildState}
+                onModeBuildStateChange={setModeBuildState}
+                chunkingConfig={chunkingConfig}
+                onChunkingConfigChange={setChunkingConfig}
+                onToggleCollapse={() => setSidebarCollapsed(true)}
+              />
+            </div>
             </>
           )}
         </div>

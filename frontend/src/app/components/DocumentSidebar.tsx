@@ -19,8 +19,9 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { Badge } from "./ui/badge";
-import type { ModeBuildState } from "../App";
+import type { ChunkingConfig, ModeBuildState } from "../App";
 import { apiFetch } from "../api";
+import { toast } from "sonner";
 
 export interface Document {
   id: string;
@@ -35,6 +36,8 @@ interface DocumentSidebarProps {
   collapsed?: boolean;
   modeBuildState: ModeBuildState;
   onModeBuildStateChange: Dispatch<SetStateAction<ModeBuildState>>;
+  chunkingConfig: ChunkingConfig;
+  onChunkingConfigChange: Dispatch<SetStateAction<ChunkingConfig>>;
   onToggleCollapse?: () => void;
 }
 
@@ -42,12 +45,15 @@ export function DocumentSidebar({
   onDocumentsChange,
   modeBuildState,
   onModeBuildStateChange,
+  chunkingConfig,
+  onChunkingConfigChange,
   onToggleCollapse,
 }: DocumentSidebarProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const previousStatusRef = useRef<ModeBuildState["status"]>(modeBuildState.status);
   const indexing = modeBuildState.status === "processing";
   const progress = modeBuildState.progress;
   const indexStatus = modeBuildState.status;
@@ -91,6 +97,18 @@ export function DocumentSidebar({
     };
   }, [indexing, onModeBuildStateChange]);
 
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+
+    if (previousStatus === "processing" && indexStatus === "ready") {
+      toast.success("Reindex complete", {
+        description: "The knowledge base is ready to use.",
+      });
+    }
+
+    previousStatusRef.current = indexStatus;
+  }, [indexStatus]);
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files) return;
@@ -122,7 +140,16 @@ export function DocumentSidebar({
       progress: 0,
     });
 
-    const uploadEndpoint = "/upload";
+    const params = new URLSearchParams({
+      chunking_mode: chunkingConfig.mode,
+    });
+
+    if (chunkingConfig.mode === "fixed") {
+      params.set("chunk_size", String(chunkingConfig.chunkSize));
+      params.set("chunk_overlap", String(chunkingConfig.chunkOverlap));
+    }
+
+    const uploadEndpoint = `/upload?${params.toString()}`;
 
     try {
       for (const file of selectedFiles) {
@@ -222,6 +249,78 @@ export function DocumentSidebar({
                 <span className="text-xs uppercase tracking-[0.18em]">Size</span>
               </div>
               <p className="mt-2 text-2xl font-semibold text-zinc-950">{formatFileSize(totalSize)}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-white/70 bg-white/75 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                  Chunking mode
+                </p>
+                <p className="mt-1 text-sm text-zinc-700">
+                  Fixed chunking works best with the backend values below.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              <label className="grid gap-2">
+                <span className="text-xs font-medium text-zinc-600">Mode</span>
+                <select
+                  value={chunkingConfig.mode}
+                  onChange={(e) =>
+                    onChunkingConfigChange((prev) => ({
+                      ...prev,
+                      mode: e.target.value === "fixed" ? "fixed" : "semantic",
+                    }))
+                  }
+                  className="h-11 rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-sky-300"
+                >
+                  <option value="fixed">Fixed</option>
+                  <option value="semantic">Semantic</option>
+                </select>
+              </label>
+
+              {chunkingConfig.mode === "fixed" ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="grid gap-2">
+                    <span className="text-xs font-medium text-zinc-600">Chunk size</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={chunkingConfig.chunkSize}
+                      onChange={(e) =>
+                        onChunkingConfigChange((prev) => ({
+                          ...prev,
+                          chunkSize: Number(e.target.value) || 600,
+                        }))
+                      }
+                      className="h-11 rounded-2xl border-zinc-200 bg-white"
+                    />
+                  </label>
+
+                  <label className="grid gap-2">
+                    <span className="text-xs font-medium text-zinc-600">Overlap</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={chunkingConfig.chunkOverlap}
+                      onChange={(e) =>
+                        onChunkingConfigChange((prev) => ({
+                          ...prev,
+                          chunkOverlap: Number(e.target.value) || 0,
+                        }))
+                      }
+                      className="h-11 rounded-2xl border-zinc-200 bg-white"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <p className="text-xs leading-5 text-zinc-500">
+                  Semantic mode uses the backend semantic splitter, so fixed chunk size settings are hidden.
+                </p>
+              )}
             </div>
           </div>
 

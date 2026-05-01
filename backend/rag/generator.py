@@ -129,7 +129,7 @@ Ngữ cảnh:
 {context}
 
 ---
-CRITICAL INSTRUCTION: You MUST answer the user's question in ENGLISH.
+CRITICAL INSTRUCTION: You MUST answer the user's question in Vietnamese.
 Trả lời (in English):
 """
 

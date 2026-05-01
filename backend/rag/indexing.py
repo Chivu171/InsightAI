@@ -234,17 +234,9 @@ def attach_chunk_metadata(chunks):
     return chunks
 
 
-def chunk_text(text, chunk_size=500, overlap=100):
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start = end - overlap
-    return chunks
 
 
-def build_index(engine, text_or_docs):
+def build_index(engine, text_or_docs, chunking_mode="semantic", chunk_size=600, chunk_overlap=120):
     engine.status = "processing"
     engine.progress = 10
 
@@ -253,8 +245,11 @@ def build_index(engine, text_or_docs):
         raise ValueError("No documents available for indexing.")
 
     engine.progress = 30
-    parent_docs = engine.parent_splitter.split_documents(docs)
-    parent_docs = attach_chunk_metadata(parent_docs)
+    if chunking_mode == "fixed":
+         parent_docs = split_fixed_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    else:
+        parent_docs = engine.parent_splitter.split_documents(docs)
+        parent_docs = attach_chunk_metadata(parent_docs)
 
     engine.progress = 50
     if engine.vectorstore is None:
@@ -277,7 +272,10 @@ def build_index(engine, text_or_docs):
     engine.all_chunks.extend(parent_docs)
     engine.bm25_corpus = [tokenize(doc.page_content) for doc in engine.all_chunks]
     engine.bm25_index = BM25Okapi(engine.bm25_corpus)
-    engine.chunking_mode = "semantic"
+    engine.chunking_mode = chunking_mode
+    engine.chunk_size = chunk_size
+    engine.chunk_overlap = chunk_overlap
+
 
     create_blocks(engine)
 
@@ -286,6 +284,20 @@ def build_index(engine, text_or_docs):
     print(f"[Hybrid] Built BM25 index with {len(engine.all_chunks)} chunks")
     return engine.vectorstore, parent_docs
 
+def split_fixed_documents(docs, chunk_size = 600, chunk_overlap = 120):
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be > 0")
+    if chunk_overlap < 0:
+        raise ValueError("chunk_overlap must be >= 0")
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be smaller than chunk_size")
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", " ", ""],
+    )
+    chunks = splitter.split_documents(docs)
+    return attach_chunk_metadata(chunks)
 
 def create_blocks(engine, block_size_chunks: int = 15, overlap_chunks: int = 3):
     """Groups chunks into larger blocks using a chunk-based sliding window (summary retrieval)."""
@@ -335,7 +347,15 @@ def save_index(engine, folder_path="vector_db"):
         pickle.dump({"all_chunks": engine.all_chunks, "bm25_corpus": engine.bm25_corpus}, f)
 
     with open(os.path.join(folder_path, "config.pkl"), "wb") as f:
-        pickle.dump({"chunking_mode": engine.chunking_mode}, f)
+        pickle.dump(
+            {
+                "chunking_mode": engine.chunking_mode,
+                "chunk_size": getattr(engine, "chunk_size", None),
+                "chunk_overlap": getattr(engine, "chunk_overlap", None),
+            },
+            f,
+    )
+
 
     return True
 
@@ -379,6 +399,9 @@ def load_index(engine, folder_path="vector_db"):
         with open(config_path, "rb") as f:
             config = pickle.load(f)
             engine.chunking_mode = config.get("chunking_mode", "semantic")
+            engine.chunk_size = config.get("chunk_size", None)
+            engine.chunk_overlap = config.get("chunk_overlap", None)
+
     else:
         engine.chunking_mode = "semantic"
 

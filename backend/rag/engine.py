@@ -77,8 +77,20 @@ class RAGEngine:
     def extract_documents(self, file_obj):
         return indexing.extract_documents(self, file_obj)
 
-    def build_index(self, text_or_docs):
-        return indexing.build_index(self, text_or_docs)
+    def build_index(
+        self,
+        text_or_docs,
+        chunking_mode: str = "semantic",
+        chunk_size: int = 600,
+        chunk_overlap: int = 120,
+    ):
+        return indexing.build_index(
+            self,
+            text_or_docs,
+            chunking_mode=chunking_mode,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
 
     def save_index(self, folder_path="vector_db"):
         return indexing.save_index(self, folder_path=folder_path)
