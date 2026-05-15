@@ -4,13 +4,18 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Q
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from rag.engine import RAGEngine
+from dotenv import load_dotenv
 
 app = FastAPI(title="InsightAI API")
+load_dotenv()
+cors_origins = os.getenv("CORS_ORIGINS")
+if not cors_origins:
+    raise RuntimeError("CORS_ORIGINS is required in production")
 
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=[cors_origins],  # Adjust in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
