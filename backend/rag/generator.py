@@ -1,8 +1,8 @@
-import os
 from typing import Tuple, List
 
 import requests
-from datetime import timezone, datetime
+
+from config import settings
 
 
 def format_request_error(error: requests.RequestException) -> str:
@@ -59,7 +59,7 @@ def generate_with_lmstudio(engine, prompt: str) -> str:
 
 
 def generate_with_google(engine, prompt: str) -> str:
-    engine.api_key = os.getenv("GOOGLE_API_KEY", engine.api_key)
+    engine.api_key = settings.google_api_key or engine.api_key
     response = requests.post(
         (
             "https://generativelanguage.googleapis.com/v1/models/"

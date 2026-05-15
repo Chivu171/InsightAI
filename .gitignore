@@ -55,3 +55,4 @@ Nhận xét từng câu.docx
 *.pdf
 test_rag.py
 *.txt
+*.docx
