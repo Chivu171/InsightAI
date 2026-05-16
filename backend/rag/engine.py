@@ -57,6 +57,9 @@ class RAGEngine:
         self.conversation_store = ConversationStore(
             max_turns=settings.max_turns,
             rewrite_history_turns=settings.rewrite_history_turns,
+            ttl_seconds=settings.session_ttl_seconds,
+            redis_url=settings.upstash_redis_rest_url,
+            redis_token=settings.upstash_redis_rest_token,
         )
         self.router = QueryRouter(self)
 

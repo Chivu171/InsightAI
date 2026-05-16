@@ -51,6 +51,9 @@ class AppConfig:
     top_k: int = 3
     max_turns: int = 15
     rewrite_history_turns: int = 5
+    upstash_redis_rest_url: str | None = None
+    upstash_redis_rest_token: str | None = None
+    session_ttl_seconds: int = 86400
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -74,6 +77,9 @@ class AppConfig:
             rewrite_history_turns=_parse_int(os.getenv("REWRITE_HISTORY_TURNS"), 5),
             debug=_parse_bool(os.getenv("DEBUG"), False),
             env=os.getenv("ENV", "development"),
+            upstash_redis_rest_url=os.getenv("UPSTASH_REDIS_REST_URL"),
+            upstash_redis_rest_token=os.getenv("UPSTASH_REDIS_REST_TOKEN"),
+            session_ttl_seconds=_parse_int(os.getenv("SESSION_TTL_SECONDS"), 86400),
         )
 
 

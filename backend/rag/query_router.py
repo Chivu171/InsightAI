@@ -106,6 +106,7 @@ Trả lời:"""
             answer, sources = self.fact_service.process_query(user_query, k=k)
 
         if session_id:
+            print("[Memory] appending turn", session_id)
             self.engine.conversation_store.append_turn(session_id, original_query, answer)
 
         return answer, sources
