@@ -11,7 +11,7 @@ export interface ModeBuildState {
 }
 
 export interface ChunkingConfig {
-  mode: "semantic" | "fixed";
+  mode: "semantic" | "fixed" | "semantic_only";
   chunkSize: number;
   chunkOverlap: number;
 }

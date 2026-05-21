@@ -258,16 +258,23 @@ def build_index(engine, text_or_docs, chunking_mode="semantic", chunk_size=600, 
     else:
         remaining_docs = parent_docs
 
-    engine.retriever = ParentDocumentRetriever(
-        vectorstore=engine.vectorstore,
-        docstore=engine.docstore,
-        child_splitter=engine.child_splitter,
-        parent_splitter=None,
-    )
-
-    engine.progress = 60
-    if remaining_docs:
-        engine.retriever.add_documents(remaining_docs)
+    if chunking_mode in ["fixed", "semantic_only"]:
+        if remaining_docs:
+            engine.vectorstore.add_documents(remaining_docs)
+        engine.retriever = engine.vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 5}
+        )
+    else:
+        engine.retriever = ParentDocumentRetriever(
+            vectorstore=engine.vectorstore,
+            docstore=engine.docstore,
+            child_splitter=engine.child_splitter,
+            parent_splitter=None,
+        )
+        engine.progress = 60
+        if remaining_docs:
+            engine.retriever.add_documents(remaining_docs)
 
     engine.all_chunks.extend(parent_docs)
     engine.bm25_corpus = [tokenize(doc.page_content) for doc in engine.all_chunks]
@@ -372,17 +379,35 @@ def load_index(engine, folder_path="vector_db"):
         print(f"[Load] FAISS load error: {e}")
         return False
 
+    chunking_mode = "semantic"
+    config_path = os.path.join(folder_path, "config.pkl")
+    if os.path.exists(config_path):
+        with open(config_path, "rb") as f:
+            config = pickle.load(f)
+            engine.chunking_mode = config.get("chunking_mode", "semantic")
+            engine.chunk_size = config.get("chunk_size", None)
+            engine.chunk_overlap = config.get("chunk_overlap", None)
+            chunking_mode = engine.chunking_mode
+    else:
+        engine.chunking_mode = "semantic"
+
     docstore_path = os.path.join(folder_path, "docstore.pkl")
     if os.path.exists(docstore_path):
         with open(docstore_path, "rb") as f:
             engine.docstore = pickle.load(f)
 
-    engine.retriever = ParentDocumentRetriever(
-        vectorstore=engine.vectorstore,
-        docstore=engine.docstore,
-        child_splitter=engine.child_splitter,
-        parent_splitter=None,
-    )
+    if chunking_mode in ["fixed", "semantic_only"]:
+        engine.retriever = engine.vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 5}
+        )
+    else:
+        engine.retriever = ParentDocumentRetriever(
+            vectorstore=engine.vectorstore,
+            docstore=engine.docstore,
+            child_splitter=engine.child_splitter,
+            parent_splitter=None,
+        )
 
     bm25_path = os.path.join(folder_path, "bm25_data.pkl")
     if os.path.exists(bm25_path):
@@ -393,17 +418,6 @@ def load_index(engine, folder_path="vector_db"):
         engine.bm25_index = BM25Okapi(engine.bm25_corpus)
 
     create_blocks(engine)
-
-    config_path = os.path.join(folder_path, "config.pkl")
-    if os.path.exists(config_path):
-        with open(config_path, "rb") as f:
-            config = pickle.load(f)
-            engine.chunking_mode = config.get("chunking_mode", "semantic")
-            engine.chunk_size = config.get("chunk_size", None)
-            engine.chunk_overlap = config.get("chunk_overlap", None)
-
-    else:
-        engine.chunking_mode = "semantic"
 
     print(f"[Load] Index loaded with mode: {engine.chunking_mode}")
     return True

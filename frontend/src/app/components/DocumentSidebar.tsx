@@ -272,13 +272,14 @@ export function DocumentSidebar({
                   onChange={(e) =>
                     onChunkingConfigChange((prev) => ({
                       ...prev,
-                      mode: e.target.value === "fixed" ? "fixed" : "semantic",
+                      mode: e.target.value as ChunkingConfig["mode"],
                     }))
                   }
                   className="h-11 rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-sky-300"
                 >
                   <option value="fixed">Fixed</option>
-                  <option value="semantic">Semantic</option>
+                  <option value="semantic">Semantic (Parent-Child)</option>
+                  <option value="semantic_only">Semantic Only</option>
                 </select>
               </label>
 
@@ -318,7 +319,9 @@ export function DocumentSidebar({
                 </div>
               ) : (
                 <p className="text-xs leading-5 text-zinc-500">
-                  Semantic mode uses the backend semantic splitter, so fixed chunk size settings are hidden.
+                  {chunkingConfig.mode === "semantic_only"
+                    ? "Semantic Only mode uses the backend semantic splitter directly, bypassing Parent-Child retrieval."
+                    : "Semantic mode uses the backend semantic splitter with Parent-Child retrieval to get broader context."}
                 </p>
               )}
             </div>
