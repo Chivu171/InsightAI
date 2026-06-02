@@ -40,6 +40,11 @@ class AppConfig:
 
     google_api_key: str | None = None
     google_model: str = "gemini-2.5-flash"
+    openrouter_api_key: str | None = None
+    openrouter_model_api: str = "https://openrouter.ai/api/v1"
+    openrouter_model_name: str = "deepseek/deepseek-v4-flash:free"
+    openrouter_site_url: str = "http://localhost:5173"
+    openrouter_app_name: str = "InsightAI"
     lmstudio_base_url: str = ""
     lmstudio_model: str | None = None
 
@@ -65,6 +70,17 @@ class AppConfig:
             cors_origins=cors_origins,
             google_api_key=os.getenv("GOOGLE_API_KEY"),
             google_model=os.getenv("GOOGLE_MODEL", "gemini-2.5-flash"),
+            openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
+            openrouter_model_api=os.getenv(
+                "OPENROUTER_MODEL_API",
+                "https://openrouter.ai/api/v1",
+            ).rstrip("/"),
+            openrouter_model_name=os.getenv(
+                "OPENROUTER_MODEL_NAME",
+                "deepseek/deepseek-v4-flash:free",
+            ),
+            openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:5173"),
+            openrouter_app_name=os.getenv("OPENROUTER_APP_NAME", "InsightAI"),
             lmstudio_base_url=os.getenv("LMSTUDIO_BASE_URL", "").rstrip("/"),
             lmstudio_model=os.getenv("LMSTUDIO_MODEL"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),

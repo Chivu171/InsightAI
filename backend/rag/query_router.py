@@ -46,20 +46,10 @@ Câu hỏi: {query}
 Trả lời:"""
 
         try:
-            if self.engine.local_base_url and self.engine.local_model:
-                res = generator.generate_with_lmstudio(self.engine, prompt).strip().lower()
-                if "summary" in res:
-                    return "summary"
-                if "fact" in res:
-                    return "fact"
-        except Exception:
-            pass
-
-        try:
-            if self.engine.api_key:
-                res = generator.generate_with_google(self.engine, prompt).strip().lower()
-                if "summary" in res:
-                    return "summary"
+            res = generator.generate_text(self.engine, prompt).strip().lower()
+            if "summary" in res:
+                return "summary"
+            if "fact" in res:
                 return "fact"
         except Exception:
             pass

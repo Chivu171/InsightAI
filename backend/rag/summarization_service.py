@@ -132,11 +132,7 @@ class SummarizationService:
             f"Ý chính nội dung:\n{refined_context}"
         )
         try:
-            if self.engine.local_base_url and self.engine.local_model:
-                answer = generator.generate_with_lmstudio(self.engine, prompt)
-            else:
-                answer = generator.generate_with_google(self.engine, prompt)
+            answer = generator.generate_text(self.engine, prompt)
             return answer, generator.build_citations(chunks)
         except Exception:
             return generator.generate_answer_from_docs(self.engine, user_query, chunks)
-

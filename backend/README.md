@@ -25,11 +25,18 @@ uvicorn main:app --reload --port 8000
 ```
 
 ## LLM configuration
-Local-first via LM Studio (recommended). Create `backend/.env`:
+OpenRouter-first, with optional LM Studio and Google fallbacks. Create `backend/.env`:
 ```env
+OPENROUTER_API_KEY=your-openrouter-key
+OPENROUTER_MODEL_API=https://openrouter.ai/api/v1
+OPENROUTER_MODEL_NAME=deepseek/deepseek-v4-flash:free
+OPENROUTER_SITE_URL=http://localhost:5173
+OPENROUTER_APP_NAME=InsightAI
+
+# Optional local fallback
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=your-local-model-name
 
-# Optional fallback
+# Optional Google fallback
 # GOOGLE_API_KEY=...
 ```

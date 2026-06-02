@@ -1,6 +1,7 @@
 from typing import Tuple, List
 
 import requests
+from openai import APIConnectionError, APIError, BadRequestError, RateLimitError
 
 from config import settings
 
@@ -37,7 +38,7 @@ def build_citations(docs) -> list[dict]:
     return citations
 
 
-def generate_with_lmstudio(engine, prompt: str) -> str:
+def generate_with_lmstudio(engine, prompt: str) -> str: 
     endpoint = f"{engine.local_base_url}/chat/completions"
     if not engine.local_base_url.endswith("/v1"):
         endpoint = f"{engine.local_base_url}/v1/chat/completions"
@@ -56,6 +57,25 @@ def generate_with_lmstudio(engine, prompt: str) -> str:
     response.raise_for_status()
     payload = response.json()
     return payload.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+
+
+def _extract_openai_content(message) -> str: # Dùng trong 2 phương thức generate
+    content = getattr(message, "content", "") or ""
+    if not content:
+        content = getattr(message, "reasoning_content", "") or ""
+    return content.strip()
+
+
+def generate_with_openrouter(engine, prompt: str) -> str:
+    if engine.openrouter_client is None:
+        raise RuntimeError("OpenRouter API key is not configured.")
+
+    response = engine.openrouter_client.chat.completions.create(
+        model=engine.openrouter_model_name,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    return _extract_openai_content(response.choices[0].message)
 
 
 def generate_with_google(engine, prompt: str) -> str:
@@ -83,7 +103,30 @@ def generate_with_google(engine, prompt: str) -> str:
     return "\n".join(texts).strip()
 
 
-def generate_answer_from_docs(engine, user_query: str, docs) -> Tuple[str, List[dict]]:
+def generate_text(engine, prompt: str) -> str: # Kết hợp của 2 phương thức generate with open router và generate with LMStudio
+    """Generate text using OpenRouter first, then legacy local/Google fallbacks.""" # Máy phát text bằng LLM
+    if engine.openrouter_client is not None:
+        try:
+            return generate_with_openrouter(engine, prompt)
+        except RateLimitError:
+            return (
+                "OpenRouter dang rate-limit model mien phi "
+                f"`{engine.openrouter_model_name}`. Thu lai sau vai phut hoac doi model khac."
+            )
+        except (BadRequestError, APIError, APIConnectionError) as openrouter_error:
+            print(f"[Generate] OpenRouter error: {openrouter_error}")
+        except Exception as openrouter_error:
+            print(f"[Generate] OpenRouter unexpected error: {openrouter_error}")
+
+    if engine.local_base_url and engine.local_model:
+        try:
+            return generate_with_lmstudio(engine, prompt)
+        except requests.RequestException as local_error:
+            print(f"[Generate] Local LLM error: {local_error}")
+    return "Chua cau hinh LLM provider. Vui long them OPENROUTER_API_KEY vao backend/.env."
+
+
+def generate_answer_from_docs(engine, user_query: str, docs) -> Tuple[str, List[dict]]: #người soạn đề bài RAG rồi đưa cho cái máy phát text
     citations = build_citations(docs)
     relevant_chunks = [doc.page_content for doc in docs]
 
@@ -142,23 +185,7 @@ Ngữ cảnh:
 CHỈ DẪN QUAN TRỌNG: BẠN PHẢI trả lời câu hỏi của người dùng bằng tiếng Việt.
 """
 
-    try:
-        answer = generate_with_lmstudio(engine, prompt)
-    except requests.RequestException as local_error:
-        if not engine.api_key:
-            print(f"[Generate] Local LLM error and no Google API key available: {local_error}")
-            return "Khong the ket noi LM Studio va chua cung cap Google API Key.", citations
-
-        try:
-            answer = generate_with_google(engine, prompt)
-        except requests.RequestException as google_error:
-            print(f"[Generate] Local LLM error: {local_error}")
-            print(f"[Generate] Google API error: {google_error}")
-            return (
-                "Khong the ket noi Local LLM. Google API loi: "
-                f"{format_request_error(google_error)}",
-                citations,
-            )
+    answer = generate_text(engine, prompt)
 
     return answer or "Khong co trong tai lieu.", citations
 
@@ -181,10 +208,7 @@ Câu hỏi mới: {user_query}
 Standalone Query:"""
 
     try:
-        if engine.local_base_url and engine.local_model:
-            rewritten = generate_with_lmstudio(engine, prompt)
-        else:
-            rewritten = generate_with_google(engine, prompt)
+        rewritten = generate_text(engine, prompt)
         rewritten = (rewritten or "").strip()
         if rewritten:
             print(f"[Memory] Rewritten Query: {rewritten}")

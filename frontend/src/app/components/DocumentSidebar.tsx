@@ -152,21 +152,25 @@ export function DocumentSidebar({
     const uploadEndpoint = `/upload?${params.toString()}`;
 
     try {
+      const formData = new FormData();
       for (const file of selectedFiles) {
-        const formData = new FormData();
         formData.append("file", file);
+      }
 
-        const response = await apiFetch(uploadEndpoint, {
-          method: "POST",
-          body: formData,
-        });
+      const response = await apiFetch(uploadEndpoint, {
+        method: "POST",
+        body: formData,
+      });
 
-        if (!response.ok) {
-          throw new Error(`Failed to upload ${file.name}`);
-        }
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Failed to upload files");
       }
     } catch (error) {
       console.error("Error reindexing files:", error);
+      toast.error("Reindex failed", {
+        description: error instanceof Error ? error.message : "Could not upload the selected files.",
+      });
       onModeBuildStateChange({
         status: "needs_rebuild",
         progress: 0,
@@ -209,7 +213,7 @@ export function DocumentSidebar({
   };
 
   return (
-    <div className="relative flex h-full flex-col bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(248,250,252,0.92)_100%)]">
+    <div className="relative flex h-full min-h-0 flex-col bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(248,250,252,0.92)_100%)]">
       <button
         onClick={onToggleCollapse}
         className="absolute -right-3 top-6 z-10 hidden size-7 items-center justify-center rounded-full border border-white/80 bg-white shadow-lg transition-colors hover:bg-zinc-50 md:flex"
@@ -218,8 +222,9 @@ export function DocumentSidebar({
         <ChevronLeft className="size-3.5 text-zinc-600" />
       </button>
 
-      <div className="border-b border-zinc-200/80 p-4 md:p-5">
-        <div className="rounded-[24px] border border-sky-100 bg-[linear-gradient(145deg,rgba(240,249,255,0.95)_0%,rgba(255,251,235,0.9)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="border-b border-zinc-200/80 p-4 md:p-5">
+          <div className="rounded-[24px] border border-sky-100 bg-[linear-gradient(145deg,rgba(240,249,255,0.95)_0%,rgba(255,251,235,0.9)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700/80">
@@ -354,10 +359,10 @@ export function DocumentSidebar({
             )}
             Reindex now
           </Button>
-        </div>
+          </div>
 
-        {(indexing || indexStatus === "ready") && (
-          <div className="mt-4 rounded-2xl border border-sky-100 bg-white/90 p-3 shadow-sm">
+          {(indexing || indexStatus === "ready") && (
+            <div className="mt-4 rounded-2xl border border-sky-100 bg-white/90 p-3 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {indexStatus !== "ready" && (
@@ -391,30 +396,29 @@ export function DocumentSidebar({
               {progress >= 85 && progress < 100 && "Saving index..."}
               {progress >= 100 && "Index complete!"}
             </p>
-          </div>
-        )}
+            </div>
+          )}
 
-        {indexStatus === "needs_rebuild" && (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/90 p-3 text-xs leading-5 text-amber-900">
-            The document list has changed. Click <span className="font-semibold">Reindex</span>{" "}
-            before asking questions.
-          </div>
-        )}
+          {indexStatus === "needs_rebuild" && (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/90 p-3 text-xs leading-5 text-amber-900">
+              The document list has changed. Click <span className="font-semibold">Reindex</span>{" "}
+              before asking questions.
+            </div>
+          )}
 
-        {documents.length > 0 && (
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-            <Input
-              placeholder="Search documents..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-11 rounded-2xl border-white/70 bg-white/85 pl-9 shadow-sm"
-            />
-          </div>
-        )}
-      </div>
+          {documents.length > 0 && (
+            <div className="relative mt-4">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+              <Input
+                placeholder="Search documents..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-11 rounded-2xl border-white/70 bg-white/85 pl-9 shadow-sm"
+              />
+            </div>
+          )}
+        </div>
 
-      <ScrollArea className="flex-1">
         <div className="space-y-3 p-3 md:p-4">
           {filteredDocuments.length === 0 && documents.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-zinc-200 bg-white/60 px-4 py-14 text-center">
@@ -470,7 +474,7 @@ export function DocumentSidebar({
       </ScrollArea>
 
       {documents.length > 0 && (
-        <div className="border-t border-zinc-200/80 bg-white/70 p-4">
+        <div className="shrink-0 border-t border-zinc-200/80 bg-white/70 p-4">
           <div className="flex items-center justify-between text-xs text-zinc-500">
             <span>{documents.length} documents</span>
             <span>{formatFileSize(totalSize)} total</span>

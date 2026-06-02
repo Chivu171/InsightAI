@@ -22,15 +22,18 @@ async def get_status(rag_engine: RAGEngine = Depends(get_rag_engine)):
 
 @router.post("/upload")
 async def upload_file(
-    file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(..., alias="file"),
     chunking_mode: str = Query("semantic"),
     chunk_size: int = Query(500),
     chunk_overlap: int = Query(100),
     rag_engine: RAGEngine = Depends(get_rag_engine),
 ):
     try:
-        documents = rag_engine.extract_documents(file)
+        documents = []
+        for file in files:
+            documents.extend(rag_engine.extract_documents(file))
+
         if not documents:
             raise HTTPException(status_code=400, detail="Could not extract text.")
 
@@ -45,7 +48,7 @@ async def upload_file(
             rag_engine.save_index()
 
         background_tasks.add_task(process)
-        return {"message": "Processing...", "status": "processing"}
+        return {"message": "Processing...", "status": "processing", "file_count": len(files)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -64,4 +67,3 @@ async def reset_index(rag_engine: RAGEngine = Depends(get_rag_engine)):
     rag_engine.clear_index()
     shutil.rmtree(settings.vector_db_path, ignore_errors=True)
     return {"status": "reset"}
-

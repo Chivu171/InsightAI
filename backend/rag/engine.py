@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from google import genai
+from openai import OpenAI
 from sentence_transformers import CrossEncoder
 
 from langchain_core.stores import InMemoryStore
@@ -28,6 +29,22 @@ class RAGEngine:
 
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
+
+        self.openrouter_api_key = settings.openrouter_api_key
+        self.openrouter_model_api = settings.openrouter_model_api
+        self.openrouter_model_name = settings.openrouter_model_name
+        self.openrouter_site_url = settings.openrouter_site_url
+        self.openrouter_app_name = settings.openrouter_app_name
+        self.openrouter_client = None
+        if self.openrouter_api_key:
+            self.openrouter_client = OpenAI(
+                base_url=self.openrouter_model_api,
+                api_key=self.openrouter_api_key,
+                default_headers={
+                    "HTTP-Referer": self.openrouter_site_url,
+                    "X-Title": self.openrouter_app_name,
+                },
+            )
 
         self.embedding_model_name = settings.embedding_model
         self.local_model = settings.lmstudio_model

@@ -121,17 +121,25 @@ This project is built with a focus on **privacy, performance, and transparency**
 
 ### 1. Prerequisites
 - Python 3.9+ & Node.js 18+
-- (Optional) [LM Studio](https://lmstudio.ai/) running a local model.
+- OpenRouter API key.
+- (Optional) [LM Studio](https://lmstudio.ai/) running a local model as a fallback.
 
 ### 2. Setup Environment
 #### **Backend** (`backend/.env`):
 ```env
-# Local LLM (via LM Studio)
+# Primary LLM (via OpenRouter)
+OPENROUTER_API_KEY=your-openrouter-key
+OPENROUTER_MODEL_API=https://openrouter.ai/api/v1
+OPENROUTER_MODEL_NAME=deepseek/deepseek-v4-flash:free
+OPENROUTER_SITE_URL=http://localhost:5173
+OPENROUTER_APP_NAME=InsightAI
+
+# Optional local fallback (via LM Studio)
 LMSTUDIO_BASE_URL=http://127.0.0.1:1234
 LMSTUDIO_MODEL=your-local-model-name
 
-# Fallback (optional)
-GOOGLE_API_KEY=your-api-key  # Required if not using LM Studio
+# Optional Google fallback
+GOOGLE_API_KEY=your-api-key
 ```
 
 #### **Frontend** (`frontend/.env`):

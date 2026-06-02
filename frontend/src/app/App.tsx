@@ -53,10 +53,10 @@ export default function App() {
       </div>
 
       <div className="relative h-full p-3 md:p-6">
-        <div className="relative flex h-full overflow-hidden rounded-[28px] border border-white/70 bg-white/75 shadow-[0_20px_80px_rgba(15,23,42,0.10)] backdrop-blur-xl">
+        <div className="relative flex h-full min-h-0 overflow-hidden rounded-[28px] border border-white/70 bg-white/75 shadow-[0_20px_80px_rgba(15,23,42,0.10)] backdrop-blur-xl">
           {!isMobile && (
             <div
-              className={`h-full shrink-0 border-r border-zinc-200/70 transition-all duration-300 ${
+              className={`h-full min-h-0 shrink-0 border-r border-zinc-200/70 transition-all duration-300 ${
                 sidebarCollapsed ? "w-0" : "w-[23rem]"
               }`}
               style={{ overflow: sidebarCollapsed ? "hidden" : "visible" }}
@@ -90,7 +90,7 @@ export default function App() {
                 className="absolute inset-0 z-20 bg-zinc-950/30 backdrop-blur-[2px]"
                 onClick={() => setSidebarCollapsed(true)}
               />
-              <div className="absolute inset-y-0 left-0 z-30 w-[88vw] max-w-sm border-r border-zinc-200/80 bg-white/92 shadow-2xl backdrop-blur-xl">
+              <div className="absolute inset-y-0 left-0 z-30 min-h-0 w-[88vw] max-w-sm border-r border-zinc-200/80 bg-white/92 shadow-2xl backdrop-blur-xl">
                 <DocumentSidebar
                 onDocumentsChange={setDocuments}
                 collapsed={sidebarCollapsed}
