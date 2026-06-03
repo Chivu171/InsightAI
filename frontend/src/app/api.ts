@@ -95,3 +95,62 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     new Error("Unable to connect to the backend (tried remote and localhost:8000).")
   );
 }
+
+// ── SSE streaming helper ──────────────────────────────────────────────────────
+
+export type SSETokenEvent   = { type: "token";   content: string };
+export type SSESourcesEvent = { type: "sources"; sources: unknown[] };
+export type SSEDoneEvent    = { type: "done" };
+export type SSEErrorEvent   = { type: "error";   content: string };
+export type SSEEvent = SSETokenEvent | SSESourcesEvent | SSEDoneEvent | SSEErrorEvent;
+
+/**
+ * Call the streaming endpoint and invoke callbacks for each SSE event.
+ * Uses the same multi-baseURL fallback logic as apiFetch.
+ */
+export async function apiStream(
+  path: string,
+  body: unknown,
+  callbacks: {
+    onToken:   (token: string)    => void;
+    onSources: (sources: unknown[]) => void;
+    onDone:    ()                 => void;
+    onError?:  (msg: string)      => void;
+  },
+): Promise<void> {
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Stream request failed: ${response.status}`);
+  }
+
+  const reader  = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer    = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? ""; // keep incomplete last line in buffer
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const event: SSEEvent = JSON.parse(line.slice(6));
+        if (event.type === "token")   callbacks.onToken(event.content);
+        if (event.type === "sources") callbacks.onSources(event.sources);
+        if (event.type === "done")    callbacks.onDone();
+        if (event.type === "error")   callbacks.onError?.(event.content);
+      } catch {
+        // malformed line — skip
+      }
+    }
+  }
+}

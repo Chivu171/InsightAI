@@ -89,7 +89,7 @@ export function DocumentSidebar({
         } catch (err) {
           console.error("Error polling progress:", err);
         }
-      }, 500);
+      }, 2000);
     }
 
     return () => {

@@ -70,6 +70,9 @@ class RAGEngine:
         self.blocks = []
         self.block_vectorstore = None
 
+        # Adaptive chunking — set by detect_doc_type() during build_index
+        self.doc_type = "general"
+
         # Conversation memory lives behind a store so it can later move to Redis/DB.
         self.conversation_store = ConversationStore(
             max_turns=settings.max_turns,
@@ -115,3 +118,7 @@ class RAGEngine:
 
     def debug_query(self, user_query, k=3, session_id=None):
         return self.router._process_debug_query(user_query, k=k, session_id=session_id)
+
+    def stream_query(self, user_query: str, k: int = 3, session_id: str | None = None):
+        """Streaming variant — yields SSE-formatted strings."""
+        return self.router._stream_query(user_query, k=k, session_id=session_id)

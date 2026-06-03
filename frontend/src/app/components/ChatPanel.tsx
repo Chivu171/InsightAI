@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { flushSync } from "react-dom";
 import {
   Send,
   Bot,
@@ -22,7 +23,7 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Document } from "./DocumentSidebar";
 import type { ModeBuildState } from "../App";
-import { apiFetch } from "../api";
+import { apiStream } from "../api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -101,52 +102,73 @@ export function ChatPanel({
     setInput("");
     setIsLoading(true);
 
+    // Insert a placeholder streaming message
+    const streamingId = `assistant-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: streamingId, role: "assistant", content: "", timestamp: new Date() } as Message,
+    ]);
+
     try {
-      const response = await apiFetch("/queryHybrid", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ 
-          query: messageText,
-          session_id: sessionId 
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch from backend");
-      }
-
-      const data = await response.json();
-      const assistantMessage: Message = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: data.answer,
-        timestamp: new Date(),
-        citations: data.sources.map((source: CitationApiResponse, idx: number) => ({
-          documentId: source.document_id || `source-${idx}`,
-          documentName: source.document_name || "Cited document",
-          page: source.page,
-          chunkId: source.chunk_id,
-          chunkIndex: source.chunk_index,
-          fileType: source.file_type,
-          uploadedAt: source.uploaded_at,
-          snippet: source.snippet,
-        })),
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+      await apiStream(
+        "/queryHybrid/stream",
+        { query: messageText, session_id: sessionId },
+        {
+          onToken: (token) => {
+            flushSync(() => {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === streamingId
+                    ? { ...msg, content: msg.content + token }
+                    : msg
+                )
+              );
+            });
+          },
+          onSources: (sources) => {
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id !== streamingId) return msg;
+                const citations = (sources as CitationApiResponse[]).map(
+                  (source, idx) => ({
+                    documentId: source.document_id || `source-${idx}`,
+                    documentName: source.document_name || "Cited document",
+                    page: source.page,
+                    chunkId: source.chunk_id,
+                    chunkIndex: source.chunk_index,
+                    fileType: source.file_type,
+                    uploadedAt: source.uploaded_at,
+                    snippet: source.snippet,
+                  })
+                );
+                return { ...msg, citations };
+              })
+            );
+          },
+          onDone: () => setIsLoading(false),
+          onError: (errMsg) => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === streamingId ? { ...msg, content: errMsg } : msg
+              )
+            );
+            setIsLoading(false);
+          },
+        }
+      );
     } catch (error) {
-      console.error("Error calling query API:", error);
-      const errorMessage: Message = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content:
-          "Sorry, an error occurred while connecting to the server. Please make sure the backend is running.",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-    } finally {
+      console.error("Error calling stream API:", error);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === streamingId
+            ? {
+                ...msg,
+                content:
+                  "Sorry, an error occurred while connecting to the server. Please make sure the backend is running.",
+              }
+            : msg
+        )
+      );
       setIsLoading(false);
     }
   };

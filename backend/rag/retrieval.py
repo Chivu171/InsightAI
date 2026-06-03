@@ -29,6 +29,39 @@ def dense_retrieve(engine, query: str, k: int = 10):
         return []
 
 
+def dense_retrieve_with_hyde(engine, query: str, k: int = 10) -> list:
+    """
+    HyDE (Hypothetical Document Embeddings): generate a fake answer with LLM,
+    embed that instead of the raw query for better semantic match with paper text.
+    Falls back to standard dense retrieval on any failure.
+    """
+    if engine.vectorstore is None:
+        return []
+
+    hyde_prompt = (
+        f"Write a concise technical paragraph (2-3 sentences) that would appear "
+        f"in an academic paper and directly answers this question: {query}\n"
+        f"Output only the paragraph, no preamble."
+    )
+    try:
+        from rag.generator import generate_text  # avoid circular at module level
+        hypothetical = (generate_text(engine, hyde_prompt) or "").strip()
+        if not hypothetical:
+            raise ValueError("Empty HyDE response")
+        print(f"[HyDE] Hypothetical: {hypothetical[:120]}...")
+    except Exception as e:
+        print(f"[HyDE] Falling back to standard dense retrieve: {e}")
+        return dense_retrieve(engine, query, k)
+
+    try:
+        embedding = engine.embeddings.embed_query(hypothetical)
+        results = engine.vectorstore.similarity_search_by_vector(embedding, k=k)
+        return results
+    except Exception as e:
+        print(f"[HyDE] Vector search error, fallback: {e}")
+        return dense_retrieve(engine, query, k)
+
+
 def rrf_fusion(result_lists, k: int = 10, rrf_k: int = 60):
     doc_scores = {}
     doc_map = {}

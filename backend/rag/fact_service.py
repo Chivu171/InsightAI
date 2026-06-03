@@ -13,7 +13,15 @@ class FactService:
 
     def run_fact_pipeline(self, user_query: str, k: int):
         bm25_results = retrieval.bm25_retrieve(self.engine, user_query, k=k * 5)
-        dense_results = retrieval.dense_retrieve(self.engine, user_query, k=k * 5)
+
+        # HyDE: only for academic papers (adds ~1 LLM call but improves recall)
+        use_hyde = getattr(self.engine, "doc_type", "general") == "academic_paper"
+        if use_hyde:
+            print("[FactService] Using HyDE for dense retrieval")
+            dense_results = retrieval.dense_retrieve_with_hyde(self.engine, user_query, k=k * 5)
+        else:
+            dense_results = retrieval.dense_retrieve(self.engine, user_query, k=k * 5)
+
         fused_results = retrieval.rrf_fusion([bm25_results, dense_results], k=k * 3)
         reranked_results = retrieval.rerank(self.engine, user_query, fused_results, top_k=k)
         return bm25_results, dense_results, fused_results, reranked_results

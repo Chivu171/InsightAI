@@ -1,7 +1,9 @@
 import os
 import pickle
 import re
+from collections import defaultdict
 from datetime import datetime, timezone
+from statistics import mode as stat_mode
 
 import numpy as np
 from rank_bm25 import BM25Okapi
@@ -27,7 +29,157 @@ try:
 except ImportError:
     from langchain.retrievers import ParentDocumentRetriever
 
-# Structural parsing was removed (DocumentStructurer deleted).
+# ── Document-type detection ────────────────────────────────────────────────────
+
+_ACADEMIC_KEYWORDS = [
+    "abstract", "introduction", "methodology", "related work",
+    "references", "conclusion", "experiments", "dataset", "baseline",
+    "arxiv", "preprint", "proceedings", "journal", "doi", "figure",
+    "table", "hypothesis", "empirical", "evaluation", "benchmark",
+]
+
+_LEGAL_KEYWORDS = [
+    "whereas", "hereinafter", "clause", "agreement", "party",
+    "indemnify", "jurisdiction", "liability", "pursuant", "obligation",
+    "contract", "termination", "warranty", "indemnification",
+]
+
+# Canonical section names found in academic papers
+_ACADEMIC_SECTIONS = {
+    "abstract", "introduction", "related work", "background",
+    "literature review", "methodology", "method", "methods",
+    "approach", "model", "proposed method", "framework",
+    "experiments", "experiment", "experimental setup", "experimental results",
+    "results", "evaluation", "analysis", "discussion",
+    "conclusion", "conclusions", "future work",
+    "references", "appendix", "acknowledgment", "acknowledgements",
+    "limitations", "ethics",
+}
+
+
+def detect_doc_type(docs: list) -> str:
+    """Infer document type from the first ~2000 chars of content."""
+    sample = " ".join(d.page_content for d in docs[:4]).lower()[:2000]
+    academic_score = sum(1 for kw in _ACADEMIC_KEYWORDS if kw in sample)
+    legal_score = sum(1 for kw in _LEGAL_KEYWORDS if kw in sample)
+    if academic_score >= 3:
+        return "academic_paper"
+    if legal_score >= 3:
+        return "legal"
+    return "general"
+
+
+def _extract_pdf_with_sections(
+    pdf_bytes: bytes,
+    document_id: str,
+    filename: str,
+    extension: str,
+    uploaded_at: str,
+) -> list:
+    """
+    Extract PDF pages as Documents, enriching each with section_title metadata.
+    Uses font-size heuristic: spans significantly larger than body text are headings.
+    Falls back to plain text extraction if font info is unavailable.
+    """
+    page_documents = []
+
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf_document:
+        total_pages = len(pdf_document)
+
+        # ── Pass 1: collect all font sizes to find body size ──────────────────
+        all_sizes = []
+        for page in pdf_document:
+            try:
+                blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+                for block in blocks:
+                    if block.get("type") != 0:
+                        continue
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            sz = span.get("size", 0)
+                            if sz > 0:
+                                all_sizes.append(round(sz, 1))
+            except Exception:
+                pass
+
+        # Body size = most frequent font size; heading threshold = 15% larger
+        try:
+            body_size = stat_mode(all_sizes) if all_sizes else 10.0
+        except Exception:
+            body_size = 10.0
+        heading_threshold = body_size * 1.15
+
+        # ── Pass 2: extract text + detect section headings ────────────────────
+        current_section = "Unknown"
+
+        for page_index, page in enumerate(pdf_document, start=1):
+            try:
+                blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+            except Exception:
+                # Fallback: plain text for this page
+                page_text = page.get_text("text").strip()
+                if page_text:
+                    page_documents.append(Document(
+                        page_content=page_text,
+                        metadata={
+                            "document_id": document_id,
+                            "document_name": filename,
+                            "file_type": extension or "pdf",
+                            "page": page_index,
+                            "total_pages": total_pages,
+                            "uploaded_at": uploaded_at,
+                            "section_title": current_section,
+                        },
+                    ))
+                continue
+
+            page_lines = []
+            for block in blocks:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    line_text_parts = []
+                    is_heading_line = False
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        size = span.get("size", 0)
+                        if not text:
+                            continue
+                        line_text_parts.append(text)
+                        # A line is a heading if any span is large enough
+                        if size >= heading_threshold:
+                            is_heading_line = True
+
+                    line_text = " ".join(line_text_parts).strip()
+                    if not line_text:
+                        continue
+
+                    # Check if heading matches known academic section names
+                    if is_heading_line and len(line_text) < 80:
+                        normalized = re.sub(r"^\d+[\.\s]+", "", line_text).strip().lower()
+                        if any(sec in normalized for sec in _ACADEMIC_SECTIONS):
+                            current_section = line_text.strip()
+
+                    page_lines.append(line_text)
+
+            page_text = "\n".join(page_lines).strip()
+            if not page_text:
+                continue
+
+            page_documents.append(Document(
+                page_content=page_text,
+                metadata={
+                    "document_id": document_id,
+                    "document_name": filename,
+                    "file_type": extension or "pdf",
+                    "page": page_index,
+                    "total_pages": total_pages,
+                    "uploaded_at": uploaded_at,
+                    "section_title": current_section,
+                },
+            ))
+
+    return page_documents
 
 
 def clear_index(engine):
@@ -35,6 +187,7 @@ def clear_index(engine):
     engine.docstore = InMemoryStore()
     engine.retriever = None
     engine.chunking_mode = None
+    engine.doc_type = "general"
     engine.bm25_index = None
     engine.bm25_corpus = []
     engine.all_chunks = []
@@ -76,27 +229,9 @@ def extract_documents(engine, file_obj):
         if hasattr(real_file, "seek"):
             real_file.seek(0)
 
-        page_documents = []
-        with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf_document:
-            total_pages = len(pdf_document)
-            for page_index, page in enumerate(pdf_document, start=1):
-                page_text = page.get_text("text").strip()
-                if not page_text:
-                    continue
-                page_documents.append(
-                    Document(
-                        page_content=page_text,
-                        metadata={
-                            "document_id": document_id,
-                            "document_name": filename,
-                            "file_type": extension or "pdf",
-                            "page": page_index,
-                            "total_pages": total_pages,
-                            "uploaded_at": uploaded_at,
-                        },
-                    )
-                )
-        return page_documents
+        return _extract_pdf_with_sections(
+            pdf_bytes, document_id, filename, extension, uploaded_at
+        )
 
     if extension == ".docx":
         raw = real_file.read()
@@ -234,6 +369,42 @@ def attach_chunk_metadata(chunks):
     return chunks
 
 
+def section_aware_split(docs: list, embeddings=None) -> list:
+    """
+    For academic papers: chunk within section boundaries.
+    Uses RecursiveCharacterTextSplitter (fast) — sections already provide
+    semantic context so SemanticChunker is redundant and very slow here.
+    """
+    # Group pages by section, preserving order
+    section_order = []
+    section_groups: dict[str, list] = defaultdict(list)
+
+    for doc in docs:
+        section = doc.metadata.get("section_title", "Unknown")
+        if section not in section_groups:
+            section_order.append(section)
+        section_groups[section].append(doc)
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=600,
+        chunk_overlap=120,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    all_chunks = []
+
+    for section in section_order:
+        section_docs = section_groups[section]
+        chunks = splitter.split_documents(section_docs)
+
+        # Propagate section_title to every child chunk
+        for chunk in chunks:
+            chunk.metadata["section_title"] = section
+
+        all_chunks.extend(chunks)
+
+    return attach_chunk_metadata(all_chunks)
+
+
 
 
 def build_index(engine, text_or_docs, chunking_mode="semantic", chunk_size=600, chunk_overlap=120):
@@ -244,10 +415,28 @@ def build_index(engine, text_or_docs, chunking_mode="semantic", chunk_size=600, 
     if not docs:
         raise ValueError("No documents available for indexing.")
 
+    # ── Auto-detect document type and choose chunking strategy ───────────────
+    engine.doc_type = detect_doc_type(docs)
+    print(f"[Adaptive] Detected doc_type: {engine.doc_type}")
+
     engine.progress = 30
     if chunking_mode == "fixed":
-         parent_docs = split_fixed_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        parent_docs = split_fixed_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    elif chunking_mode == "semantic" and engine.doc_type == "academic_paper":
+        # Section-aware: chunk within section boundaries (fast, no embedding calls)
+        print("[Adaptive] Using section-aware chunking for academic paper")
+        parent_docs = section_aware_split(docs)
+    elif chunking_mode == "semantic":
+        # General/legal doc: SemanticChunker for best quality (slower)
+        print(f"[Adaptive] Using SemanticChunker for doc_type={engine.doc_type}")
+        parent_docs = engine.parent_splitter.split_documents(docs)
+        parent_docs = attach_chunk_metadata(parent_docs)
+    elif chunking_mode == "semantic_only" and engine.doc_type == "academic_paper":
+        # semantic_only + academic paper → section-aware (fast)
+        print("[Adaptive] semantic_only + academic_paper → section-aware chunking")
+        parent_docs = section_aware_split(docs)
     else:
+        # semantic_only + general/legal: SemanticChunker (slow, opt-in explicitly)
         parent_docs = engine.parent_splitter.split_documents(docs)
         parent_docs = attach_chunk_metadata(parent_docs)
 
@@ -359,9 +548,10 @@ def save_index(engine, folder_path="vector_db"):
                 "chunking_mode": engine.chunking_mode,
                 "chunk_size": getattr(engine, "chunk_size", None),
                 "chunk_overlap": getattr(engine, "chunk_overlap", None),
+                "doc_type": getattr(engine, "doc_type", "general"),
             },
             f,
-    )
+        )
 
 
     return True
@@ -387,6 +577,7 @@ def load_index(engine, folder_path="vector_db"):
             engine.chunking_mode = config.get("chunking_mode", "semantic")
             engine.chunk_size = config.get("chunk_size", None)
             engine.chunk_overlap = config.get("chunk_overlap", None)
+            engine.doc_type = config.get("doc_type", "general")
             chunking_mode = engine.chunking_mode
     else:
         engine.chunking_mode = "semantic"

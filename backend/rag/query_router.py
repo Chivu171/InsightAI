@@ -174,3 +174,51 @@ Trả lời:"""
             "sources": sources,
             "debug": debug,
         }
+
+    def _stream_query(self, user_query: str, k: int = 3, session_id: str | None = None):
+        """
+        Streaming variant: runs retrieval synchronously, then yields SSE events
+        from the LLM token-by-token.
+        Yields strings formatted as SSE (see generator._sse).
+        """
+        if self.engine.retriever is None and not self.engine.load_index():
+            yield generator._sse("token", {"content": "Chưa có dữ liệu. Vui lòng tải file và index trước."})
+            yield generator._sse("done", {})
+            return
+
+        original_query = user_query
+        if session_id:
+            user_query = self._rewrite_query_with_history(user_query, session_id)
+
+        q_type = self._classify_query(user_query)
+
+        # ── Retrieval (synchronous) ───────────────────────────────────────────
+        if q_type == "summary" and self.engine.block_vectorstore:
+            relevant_blocks = self.engine.block_vectorstore.similarity_search(user_query, k=4)
+            chunk_map = {c.metadata.get("chunk_id"): c for c in self.engine.all_chunks}
+            candidate_chunks, seen_ids = [], set()
+            for block in relevant_blocks:
+                for cid in block.metadata.get("child_chunk_ids", []):
+                    if cid in chunk_map and cid not in seen_ids:
+                        candidate_chunks.append(chunk_map[cid])
+                        seen_ids.add(cid)
+            q_emb = self.engine.embeddings.embed_query(user_query)
+            docs = self.summarization.mmr_select(q_emb, candidate_chunks, k=k + 4, lambda_val=0.4)
+        else:
+            _, _, _, docs = self.fact_service.run_fact_pipeline(user_query, k=k)
+
+        # ── Streaming generation ──────────────────────────────────────────────
+        collected_answer = []
+        for sse_line in generator.stream_answer_from_docs(self.engine, user_query, docs):
+            collected_answer.append(sse_line)
+            yield sse_line
+
+        # Persist turn to conversation memory
+        if session_id:
+            import json as _json
+            full_answer = "".join(
+                _json.loads(line[6:]).get("content", "")
+                for line in collected_answer
+                if line.startswith("data:") and '"token"' in line
+            )
+            self.engine.conversation_store.append_turn(session_id, original_query, full_answer)

@@ -1,4 +1,5 @@
-from typing import Tuple, List
+import json
+from typing import Generator, Iterator, Tuple, List
 
 import requests
 from openai import APIConnectionError, APIError, BadRequestError, RateLimitError
@@ -216,3 +217,106 @@ Standalone Query:"""
         return user_query
     except Exception:
         return user_query
+
+
+# ── Streaming ──────────────────────────────────────────────────────────────────
+
+def _sse(event_type: str, payload: dict) -> str:
+    """Format a single SSE line."""
+    return f"data: {json.dumps({'type': event_type, **payload}, ensure_ascii=False)}\n\n"
+
+
+def stream_with_openrouter(engine, prompt: str) -> Iterator[str]:
+    """Yield raw token strings from OpenRouter streaming API."""
+    if engine.openrouter_client is None:
+        yield "Chưa cấu hình LLM provider. Vui lòng thêm OPENROUTER_API_KEY vào backend/.env."
+        return
+
+    try:
+        stream = engine.openrouter_client.chat.completions.create(
+            model=engine.openrouter_model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
+    except RateLimitError:
+        yield (
+            f"\nOpenRouter đang rate-limit model `{engine.openrouter_model_name}`. "
+            "Thử lại sau vài phút hoặc đổi model khác."
+        )
+    except Exception as e:
+        print(f"[Stream] OpenRouter error: {e}")
+        # Fallback to non-streaming
+        try:
+            yield generate_text(engine, prompt)
+        except Exception:
+            yield "Lỗi khi tạo câu trả lời."
+
+
+def stream_answer_from_docs(engine, user_query: str, docs) -> Iterator[str]:
+    """
+    Yield SSE-formatted strings:
+      - {"type": "token", "content": "..."}  for each streamed token
+      - {"type": "sources", "sources": [...]} after generation
+      - {"type": "done"}                      to signal completion
+    """
+    citations = build_citations(docs)
+    relevant_chunks = [doc.page_content for doc in docs]
+
+    if not relevant_chunks:
+        yield _sse("token", {"content": "Không có trong tài liệu."})
+        yield _sse("sources", {"sources": citations})
+        yield _sse("done", {})
+        return
+
+    context = "\n---\n".join(relevant_chunks)
+
+    # Reuse the same prompt as generate_answer_from_docs
+    prompt = f"""
+[Vai trò]
+Bạn là trợ lý AI chuyên hỗ trợ đọc hiểu bài báo khoa học, paper học thuật, báo cáo nghiên cứu và tài liệu kỹ thuật.
+
+[Bối cảnh]
+Bạn đang trả lời dựa trên ngữ cảnh được truy xuất từ tài liệu bằng hệ thống RAG.
+Ngữ cảnh có thể là abstract, introduction, related work, methodology, experiments, results, discussion, conclusion, bảng biểu, hoặc caption hình.
+Ngữ cảnh có thể chưa đầy đủ, vì vậy phải ưu tiên thông tin có trong ngữ cảnh trước và không tự suy diễn vượt quá dữ liệu.
+
+[Mục tiêu]
+Giúp người dùng:
+- nắm được đề tài, câu hỏi nghiên cứu, và đóng góp chính của bài
+- hiểu phương pháp, mô hình, dữ liệu, thiết lập thí nghiệm, metric và kết quả
+- trích đúng insight học thuật từ bài báo
+- phân biệt rõ nội dung có căn cứ trong paper với phần giải thích thêm
+
+[Nhiệm vụ]
+Trả lời theo đúng mục tiêu người dùng. Nếu hỏi tóm tắt, ưu tiên cấu trúc:
+1. Bài toán / mục tiêu nghiên cứu
+2. Ý tưởng hoặc phương pháp chính
+3. Dữ liệu / thiết lập / thực nghiệm
+4. Kết quả chính
+5. Hạn chế hoặc lưu ý
+
+[Ràng buộc]
+- Chỉ dùng thông tin có trong ngữ cảnh được cung cấp.
+- Không bịa, không thêm kết luận mà paper không hỗ trợ.
+- Nếu không tìm thấy trong tài liệu, nói rõ: "Không có trong tài liệu".
+- Trả lời bằng tiếng Việt, rõ ràng, chính xác.
+
+Câu hỏi: {user_query}
+
+Ngữ cảnh:
+{context}
+
+---
+CHỈ DẪN QUAN TRỌNG: BẠN PHẢI trả lời câu hỏi của người dùng bằng tiếng Việt.
+"""
+
+    for token in stream_with_openrouter(engine, prompt):
+        yield _sse("token", {"content": token})
+
+    yield _sse("sources", {"sources": citations})
+    yield _sse("done", {})
