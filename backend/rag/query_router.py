@@ -68,30 +68,8 @@ Trả lời:"""
         print("Query type:", q_type)
 
         if q_type == "summary":
-            if self.engine.block_vectorstore:
-                relevant_blocks = self.engine.block_vectorstore.similarity_search(user_query, k=4)
-                retrieval.log_retrieval_stage("Summary:Blocks-Retrieved", relevant_blocks, user_query)
-
-                chunk_map = {c.metadata.get("chunk_id"): c for c in self.engine.all_chunks}
-                candidate_chunks = []
-                seen_ids = set()
-                for block in relevant_blocks:
-                    for cid in block.metadata.get("child_chunk_ids", []):
-                        if cid in chunk_map and cid not in seen_ids:
-                            candidate_chunks.append(chunk_map[cid])
-                            seen_ids.add(cid)
-
-                retrieval.log_retrieval_stage("Summary:Candidates-From-Blocks", candidate_chunks, user_query, limit=10)
-                query_embedding = self.engine.embeddings.embed_query(user_query)
-                diverse_chunks = self.summarization.mmr_select(query_embedding, candidate_chunks, k=k + 4, lambda_val=0.4)
-                retrieval.log_retrieval_stage("Summary:Final-Diverse-Chunks (MMR)", diverse_chunks, user_query)
-                answer, sources = self.summarization.generate_summary_from_chunks(user_query, diverse_chunks)
-            else:
-                bm25, dense, fused, reranked = self.fact_service.run_fact_pipeline(user_query, k=20)
-                query_embedding = self.engine.embeddings.embed_query(user_query)
-                diverse_chunks = self.summarization.mmr_select(query_embedding, reranked, k=k + 6)
-                retrieval.log_retrieval_stage("Fallback-Diverse", diverse_chunks, user_query)
-                answer, sources = self.summarization.generate_summary_from_chunks(user_query, diverse_chunks)
+            _, _, diverse_chunks = self.summarization.run_summarize_pipeline(user_query, k=k)
+            answer, sources = self.summarization.generate_summary_from_chunks(user_query, diverse_chunks)
         else:
             answer, sources = self.fact_service.process_query(user_query, k=k)
 
@@ -111,53 +89,26 @@ Trả lời:"""
 
         q_type = self._classify_query(user_query)
         if q_type == "summary":
-            if self.engine.block_vectorstore:
-                relevant_blocks = self.engine.block_vectorstore.similarity_search(user_query, k=4)
-                retrieval.log_retrieval_stage("Summary:Blocks-Retrieved", relevant_blocks, user_query)
+            blocks, candidate_chunks, diverse_chunks = self.summarization.run_summarize_pipeline(
+                user_query, k=k
+            )
+            answer, sources = self.summarization.generate_summary_from_chunks(user_query, diverse_chunks)
 
-                candidate_chunks = []
-                seen_ids = set()
-                for block in relevant_blocks:
-                    for cid in block.metadata.get("child_chunk_ids", []):
-                        if cid in seen_ids:
-                            continue
-                        for chunk in self.engine.all_chunks:
-                            if chunk.metadata.get("chunk_id") == cid:
-                                candidate_chunks.append(chunk)
-                                seen_ids.add(cid)
-                                break
-
-                retrieval.log_retrieval_stage("Summary:Candidates-From-Blocks", candidate_chunks, user_query, limit=10)
-                q_emb = self.engine.embeddings.embed_query(user_query)
-                diverse_chunks = self.summarization.mmr_select(q_emb, candidate_chunks, k=k + 4, lambda_val=0.4)
-                retrieval.log_retrieval_stage("Summary:Final-Diverse-Chunks (MMR)", diverse_chunks, user_query)
-
-                answer, sources = self.summarization.generate_summary_from_chunks(user_query, diverse_chunks)
+            if blocks is not None:
                 debug = {
                     "query_type": "summary",
                     "method": "block-based",
                     "blocks_retrieved": [
                         {"id": b.metadata.get("block_id"), "content": (b.page_content or "")[:200]}
-                        for b in relevant_blocks
+                        for b in blocks
                     ],
                     "candidates_preview": retrieval.docs_to_debug_items(candidate_chunks[:10], content_chars=150),
                     "diverse_chunks": retrieval.docs_to_debug_items(diverse_chunks, content_chars=200),
                 }
             else:
-                bm25_results, dense_results, fused_results, _ = self.fact_service.run_fact_pipeline(
-                    user_query, k=20
-                )
-                q_emb = self.engine.embeddings.embed_query(user_query)
-                diverse_chunks = self.summarization.mmr_select(q_emb, fused_results, k=k + 6)
-                retrieval.log_retrieval_stage("Fallback-Diverse", diverse_chunks, user_query)
-
-                answer, sources = self.summarization.generate_summary_from_chunks(user_query, diverse_chunks)
                 debug = {
                     "query_type": "summary",
                     "method": "fallback-mmr",
-                    "bm25_results": retrieval.docs_to_debug_items(bm25_results, content_chars=200),
-                    "dense_results": retrieval.docs_to_debug_items(dense_results, content_chars=200),
-                    "fused_results": retrieval.docs_to_debug_items(fused_results, content_chars=200),
                     "diverse_chunks": retrieval.docs_to_debug_items(diverse_chunks, content_chars=200),
                 }
         else:
@@ -193,17 +144,8 @@ Trả lời:"""
         q_type = self._classify_query(user_query)
 
         # ── Retrieval (synchronous) ───────────────────────────────────────────
-        if q_type == "summary" and self.engine.block_vectorstore:
-            relevant_blocks = self.engine.block_vectorstore.similarity_search(user_query, k=4)
-            chunk_map = {c.metadata.get("chunk_id"): c for c in self.engine.all_chunks}
-            candidate_chunks, seen_ids = [], set()
-            for block in relevant_blocks:
-                for cid in block.metadata.get("child_chunk_ids", []):
-                    if cid in chunk_map and cid not in seen_ids:
-                        candidate_chunks.append(chunk_map[cid])
-                        seen_ids.add(cid)
-            q_emb = self.engine.embeddings.embed_query(user_query)
-            docs = self.summarization.mmr_select(q_emb, candidate_chunks, k=k + 4, lambda_val=0.4)
+        if q_type == "summary":
+            _, _, docs = self.summarization.run_summarize_pipeline(user_query, k=k)
         else:
             _, _, _, docs = self.fact_service.run_fact_pipeline(user_query, k=k)
 

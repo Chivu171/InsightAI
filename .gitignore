@@ -56,3 +56,7 @@ Nhận xét từng câu.docx
 test_rag.py
 *.txt
 *.docx
+/bao_cao
+*.md
+*.c
+exercise

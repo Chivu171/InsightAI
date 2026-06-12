@@ -327,7 +327,7 @@ export function ChatPanel({
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-4xl space-y-6">
+          <div className="mx-auto max-w-5xl space-y-6">
             {messages.map((message, index) => (
               <div
                 key={message.id}
@@ -345,7 +345,7 @@ export function ChatPanel({
                 <div className={`flex-1 ${message.role === "user" ? "flex justify-end" : ""}`}>
                   <div className={message.role === "user" ? "flex flex-col items-end" : ""}>
                     <div
-                      className={`inline-block max-w-[88%] rounded-[24px] px-4 py-3 ${
+                      className={`inline-block max-w-[96%] rounded-[24px] px-4 py-3 ${
                         message.role === "user"
                           ? "bg-[linear-gradient(135deg,#0f172a_0%,#0369a1_100%)] text-white shadow-lg shadow-sky-500/15"
                           : "border border-white/80 bg-white/80 text-zinc-900 shadow-sm backdrop-blur"
@@ -488,8 +488,8 @@ export function ChatPanel({
       </ScrollArea>
 
       <div className="border-t border-zinc-200/70 bg-white/50 px-4 py-4 backdrop-blur-xl md:px-8 md:py-5">
-        <div className="mx-auto max-w-4xl">
-          <div className="relative rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
+          <div className="mx-auto max-w-5xl">
+            <div className="relative rounded-[28px] border border-white/80 bg-white/90 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
             <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
               <Badge className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-600 hover:bg-zinc-50">
                 Press Enter to send
@@ -519,7 +519,7 @@ export function ChatPanel({
                   ? "Ask a question about your documents..."
                   : `The system is not ready yet. Build the index from the sidebar first.`
               }
-              className="min-h-[120px] max-h-44 rounded-[22px] border-zinc-200/80 bg-zinc-50/70 px-4 py-3 pr-14 text-sm leading-7 shadow-inner"
+              className="min-h-[60px] max-h-32 rounded-[22px] border-zinc-200/80 bg-zinc-50/70 px-4 py-2 pr-14 text-sm leading-6 shadow-inner"
               disabled={isLoading || !modeReady}
             />
 

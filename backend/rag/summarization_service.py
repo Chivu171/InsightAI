@@ -4,12 +4,57 @@ import re
 
 import numpy as np
 
-from rag import generator
+from rag import generator, retrieval
 
 
 class SummarizationService:
     def __init__(self, engine):
         self.engine = engine
+
+    def run_summarize_pipeline(self, user_query: str, k: int = 3):
+        """
+        Full summary retrieval pipeline.
+        Returns (blocks, candidate_chunks, diverse_chunks)
+        """
+        use_hyde = getattr(self.engine, "doc_type", "general") == "academic_paper"
+        retrieval_query = user_query
+        if use_hyde:
+            hyde_prompt = (
+                f"Write a concise technical paragraph (2-3 sentences) that would appear "
+                f"in an academic paper and directly answers this question: {user_query}\n"
+                f"Output only the paragraph, no preamble."
+            )
+            try:
+                hypothetical = (generator.generate_text(self.engine, hyde_prompt) or "").strip()
+                if hypothetical:
+                    retrieval_query = hypothetical
+            except Exception as e:
+                print(f"[SummarizePipeline] HyDE failed: {e}")
+
+        blocks = None
+        candidate_chunks = []
+
+        if self.engine.block_vectorstore:
+            blocks = self.engine.block_vectorstore.similarity_search(retrieval_query, k=4)
+            retrieval.log_retrieval_stage("Summary:Blocks-Retrieved", blocks, user_query)
+            chunk_map = {c.metadata.get("chunk_id"): c for c in self.engine.all_chunks}
+            seen_ids = set()
+            for block in blocks:
+                for cid in block.metadata.get("child_chunk_ids", []):
+                    if cid in chunk_map and cid not in seen_ids:
+                        candidate_chunks.append(chunk_map[cid])
+                        seen_ids.add(cid)
+            retrieval.log_retrieval_stage("Summary:Candidates-From-Blocks", candidate_chunks, user_query)
+        else:
+            from rag.fact_service import FactService
+            fact_service = FactService(self.engine)
+            _, _, _, candidate_chunks = fact_service.run_fact_pipeline(user_query, k=20)
+
+        query_embedding = self.engine.embeddings.embed_query(retrieval_query)
+        diverse_chunks = self.mmr_select(query_embedding, candidate_chunks, k=k + 4, lambda_val=0.4)
+        retrieval.log_retrieval_stage("Summary:Final-Diverse-Chunks (MMR)", diverse_chunks, user_query)
+
+        return blocks, candidate_chunks, diverse_chunks
 
     def mmr_select(self, query_embedding, docs, k=5, lambda_val=0.5):
         if not docs:
