@@ -423,9 +423,10 @@ def build_index(engine, text_or_docs, chunking_mode="semantic", chunk_size=600, 
     if chunking_mode == "fixed":
         parent_docs = split_fixed_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     elif chunking_mode == "semantic" and engine.doc_type == "academic_paper":
-        # Section-aware: chunk within section boundaries (fast, no embedding calls)
-        print("[Adaptive] Using section-aware chunking for academic paper")
-        parent_docs = section_aware_split(docs)
+        # Academic paper: still detect sections via metadata, but use SemanticChunker
+        print("[Adaptive] Using SemanticChunker for academic paper")
+        parent_docs = engine.parent_splitter.split_documents(docs)
+        parent_docs = attach_chunk_metadata(parent_docs)
     elif chunking_mode == "semantic":
         # General/legal doc: SemanticChunker for best quality (slower)
         print(f"[Adaptive] Using SemanticChunker for doc_type={engine.doc_type}")
