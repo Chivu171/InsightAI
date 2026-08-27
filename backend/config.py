@@ -43,7 +43,7 @@ class AppConfig:
     google_model: str = "gemini-2.5-flash"
     openrouter_api_key: str | None = None
     openrouter_model_api: str = "https://openrouter.ai/api/v1"
-    openrouter_model_name: str = "deepseek/deepseek-v4-flash:free"
+    openrouter_model_name: str = "nvidia/nemotron-3-super-120b-a12b:free"
     openrouter_site_url: str = "http://localhost:5173"
     openrouter_app_name: str = "InsightAI"
     lmstudio_base_url: str = ""

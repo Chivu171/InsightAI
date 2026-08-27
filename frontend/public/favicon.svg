@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+  </defs>
+  <!-- Background: rounded square with sky gradient -->
+  <rect x="0" y="0" width="32" height="32" rx="7" ry="7" fill="url(#g)"/>
+  <!-- Subtle inner glow / sheen -->
+  <rect x="0" y="0" width="32" height="16" rx="7" ry="7" fill="url(#sheen)" opacity="0.18"/>
+  <defs>
+    <linearGradient id="sheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Letter V — two clean strokes converging at the bottom -->
+  <path d="M 8 8 L 11 8 L 16 19.5 L 21 8 L 24 8 L 17.2 24 L 14.8 24 Z"
+        fill="#ffffff" stroke="#ffffff" stroke-width="0.6" stroke-linejoin="round"/>
+</svg>

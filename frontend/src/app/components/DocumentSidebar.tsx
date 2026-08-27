@@ -10,7 +10,6 @@ import {
   Trash2,
   ChevronLeft,
   Loader2,
-  Sparkles,
   Database,
   Files,
   RefreshCw,
@@ -21,6 +20,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Badge } from "./ui/badge";
 import type { ChunkingConfig, ModeBuildState } from "../App";
 import { apiFetch } from "../api";
+import { Logo } from "./Logo";
 import { toast } from "sonner";
 
 export interface Document {
@@ -235,8 +235,8 @@ export function DocumentSidebar({
                 Upload the documents related to your work, then click reindex so the system is ready to analyze them.
               </p>
             </div>
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-white/85 text-sky-600 shadow-sm">
-              <Sparkles className="size-5" />
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/85 shadow-sm ring-1 ring-sky-100/60">
+              <Logo className="size-9" />
             </div>
           </div>
 

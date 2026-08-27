@@ -5,7 +5,6 @@ import {
   Bot,
   User,
   Loader2,
-  Sparkles,
   ChevronRight,
   FileText,
   RotateCcw,
@@ -22,6 +21,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Document } from "./DocumentSidebar";
+import { Logo } from "./Logo";
 import type { ModeBuildState } from "../App";
 import { apiStream } from "../api";
 import ReactMarkdown from "react-markdown";
@@ -241,9 +241,7 @@ export function ChatPanel({
             >
               {sidebarCollapsed ? <ChevronRight className="size-4" /> : <Menu className="size-4" />}
             </button>
-            <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0f172a_0%,#0369a1_100%)] text-white shadow-lg shadow-sky-500/20">
-              <Sparkles className="size-5" />
-            </div>
+            <Logo className="size-12 shrink-0" />
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-700/80">
                 Insight Workspace
@@ -280,8 +278,8 @@ export function ChatPanel({
             <div className="rounded-[32px] border border-white/80 bg-[linear-gradient(145deg,rgba(255,255,255,0.94)_0%,rgba(240,249,255,0.92)_52%,rgba(255,251,235,0.86)_100%)] p-6 shadow-[0_16px_50px_rgba(15,23,42,0.08)] md:p-8">
               <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
                 <div className="max-w-2xl">
-                  <div className="mb-4 flex size-18 items-center justify-center rounded-full bg-[linear-gradient(135deg,#e0f2fe_0%,#fef3c7_100%)]">
-                    <Bot className="size-9 text-sky-700" />
+                  <div className="mb-4 flex size-20 items-center justify-center rounded-3xl bg-gradient-to-br from-sky-50 to-amber-50/80 ring-1 ring-sky-100/60">
+                    <Logo className="size-12" />
                   </div>
                   <h3 className="text-3xl font-semibold leading-tight text-zinc-950 md:text-4xl">
                     Ask questions about your documents with clear, cited answers.
