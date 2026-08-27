@@ -60,4 +60,10 @@ ARG BUILD_SHA=local
 RUN echo "build sha=${BUILD_SHA} built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /app/BUILD_INFO && \
     cat /app/BUILD_INFO
 
+# Entrypoint recreates volume-mounted subdirs at every boot (build-time mkdir
+# is masked by the volume mount). See entrypoint.sh for the full rationale.
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
