@@ -71,3 +71,4 @@ exercise
 data/
 backend/uploads/
 backend/hf_cache/
+vercel.json
