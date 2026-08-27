@@ -54,8 +54,20 @@ Nhận xét từng câu.docx
 🔹 10 câu hỏi test RAG.docx
 test_rag.py
 *.txt
+!data/sample.txt
 *.docx
+!backend/legacy/README.md
 /bao_cao
-*.md
 *.c
 exercise
+
+# Keep deploy docs
+!DEPLOY.md
+!README.md
+!frontend/README.md
+!backend/README.md
+
+# Fly volume mount (runtime, not repo)
+data/
+backend/uploads/
+backend/hf_cache/

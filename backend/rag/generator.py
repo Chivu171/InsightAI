@@ -1,10 +1,13 @@
 import json
+import logging
 from typing import Generator, Iterator, Tuple, List
 
 import requests
 from openai import APIConnectionError, APIError, BadRequestError, RateLimitError
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def format_request_error(error: requests.RequestException) -> str:
@@ -115,15 +118,15 @@ def generate_text(engine, prompt: str) -> str: # Kết hợp của 2 phương th
                 f"`{engine.openrouter_model_name}`. Thu lai sau vai phut hoac doi model khac."
             )
         except (BadRequestError, APIError, APIConnectionError) as openrouter_error:
-            print(f"[Generate] OpenRouter error: {openrouter_error}")
+            logger.warning("[Generate] OpenRouter error: %s", openrouter_error)
         except Exception as openrouter_error:
-            print(f"[Generate] OpenRouter unexpected error: {openrouter_error}")
+            logger.warning("[Generate] OpenRouter unexpected error: %s", openrouter_error)
 
     if engine.local_base_url and engine.local_model:
         try:
             return generate_with_lmstudio(engine, prompt)
         except requests.RequestException as local_error:
-            print(f"[Generate] Local LLM error: {local_error}")
+            logger.warning("[Generate] Local LLM error: %s", local_error)
     return "Chua cau hinh LLM provider. Vui long them OPENROUTER_API_KEY vao backend/.env."
 
 
@@ -212,7 +215,7 @@ Standalone Query:"""
         rewritten = generate_text(engine, prompt)
         rewritten = (rewritten or "").strip()
         if rewritten:
-            print(f"[Memory] Rewritten Query: {rewritten}")
+            logger.info("[Memory] Rewritten Query: %s", rewritten)
             return rewritten
         return user_query
     except Exception:
@@ -249,7 +252,7 @@ def stream_with_openrouter(engine, prompt: str) -> Iterator[str]:
             "Thử lại sau vài phút hoặc đổi model khác."
         )
     except Exception as e:
-        print(f"[Stream] OpenRouter error: {e}")
+        logger.warning("[Stream] OpenRouter error: %s", e)
         # Fallback to non-streaming
         try:
             yield generate_text(engine, prompt)

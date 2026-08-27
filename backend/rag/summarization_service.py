@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import re
 
 import numpy as np
@@ -29,7 +33,7 @@ class SummarizationService:
                 if hypothetical:
                     retrieval_query = hypothetical
             except Exception as e:
-                print(f"[SummarizePipeline] HyDE failed: {e}")
+                logger.info(f"[SummarizePipeline] HyDE failed: {e}")
 
         blocks = None
         candidate_chunks = []

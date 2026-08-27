@@ -1,0 +1,71 @@
+app = "insightai-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ENV = "production"
+  VECTOR_DB_PATH = "/data/vector_db"
+  UPLOAD_DIR = "/data/uploads"
+  HF_HOME = "/data/hf_cache"
+  # CORS_ORIGINS must be set via `fly secrets set CORS_ORIGINS=...`
+  # Example: fly secrets set CORS_ORIGINS="https://insightai.vercel.app,https://insightai-api.fly.dev"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8000
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+  [[services.http_checks]]
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "180s"
+    method = "GET"
+    path = "/ready"
+    protocol = "http"
+    restart_limit = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"
+
+[[mounts]]
+  source = "insightai_data"
+  destination = "/data"
+  initial_size = "2GB"
+
+# To create volume (first time):
+#   fly volumes create insightai_data --region sin --size 2 --yes
+# To set secrets:
+#   fly secrets set OPENROUTER_API_KEY=xxx GOOGLE_API_KEY=xxx CORS_ORIGINS="https://your-vercel.vercel.app"
+#   fly secrets set UPSTASH_REDIS_REST_URL=xxx UPSTASH_REDIS_REST_TOKEN=xxx
+# To deploy:
+#   fly deploy --remote-only

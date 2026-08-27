@@ -24,7 +24,7 @@ const joinUrl = (baseUrl: string, path: string) => {
 
 const DEFAULT_TIMEOUT_MS_REMOTE = 100000;
 const DEFAULT_TIMEOUT_MS_LOCAL = 10000000;
-const LONG_RUNNING_TIMEOUT_MS_LOCAL = 20 * 60 * 100000;
+const LONG_RUNNING_TIMEOUT_MS_LOCAL = 20 * 60 * 1000; // 20 minutes
 
 const isLocalBaseUrl = (baseUrl: string) =>
   baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");

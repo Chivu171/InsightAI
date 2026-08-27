@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from rag import generator
 from rag import retrieval
 from rag.fact_service import FactService
@@ -65,7 +69,7 @@ Trả lời:"""
             user_query = self._rewrite_query_with_history(user_query, session_id)
 
         q_type = self._classify_query(user_query)
-        print("Query type:", q_type)
+        logger.info("Query type: %s", q_type)
 
         if q_type == "summary":
             _, _, diverse_chunks = self.summarization.run_summarize_pipeline(user_query, k=k)
@@ -74,7 +78,7 @@ Trả lời:"""
             answer, sources = self.fact_service.process_query(user_query, k=k)
 
         if session_id:
-            print("[Memory] appending turn", session_id)
+            logger.info("[Memory] appending turn %s", session_id)
             self.engine.conversation_store.append_turn(session_id, original_query, answer)
 
         return answer, sources

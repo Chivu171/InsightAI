@@ -1,4 +1,7 @@
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 import pickle
 import re
 from collections import defaultdict
@@ -417,24 +420,24 @@ def build_index(engine, text_or_docs, chunking_mode="semantic", chunk_size=600, 
 
     # ── Auto-detect document type and choose chunking strategy ───────────────
     engine.doc_type = detect_doc_type(docs)
-    print(f"[Adaptive] Detected doc_type: {engine.doc_type}")
+    logger.info(f"[Adaptive] Detected doc_type: {engine.doc_type}")
 
     engine.progress = 30
     if chunking_mode == "fixed":
         parent_docs = split_fixed_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     elif chunking_mode == "semantic" and engine.doc_type == "academic_paper":
         # Academic paper: still detect sections via metadata, but use SemanticChunker
-        print("[Adaptive] Using SemanticChunker for academic paper")
+        logger.info("[Adaptive] Using SemanticChunker for academic paper")
         parent_docs = engine.parent_splitter.split_documents(docs)
         parent_docs = attach_chunk_metadata(parent_docs)
     elif chunking_mode == "semantic":
         # General/legal doc: SemanticChunker for best quality (slower)
-        print(f"[Adaptive] Using SemanticChunker for doc_type={engine.doc_type}")
+        logger.info(f"[Adaptive] Using SemanticChunker for doc_type={engine.doc_type}")
         parent_docs = engine.parent_splitter.split_documents(docs)
         parent_docs = attach_chunk_metadata(parent_docs)
     elif chunking_mode == "semantic_only" and engine.doc_type == "academic_paper":
         # semantic_only + academic paper → section-aware (fast)
-        print("[Adaptive] semantic_only + academic_paper → section-aware chunking")
+        logger.info("[Adaptive] semantic_only + academic_paper → section-aware chunking")
         parent_docs = section_aware_split(docs)
     else:
         # semantic_only + general/legal: SemanticChunker (slow, opt-in explicitly)
@@ -478,7 +481,7 @@ def build_index(engine, text_or_docs, chunking_mode="semantic", chunk_size=600, 
 
     engine.progress = 100
     engine.status = "done"
-    print(f"[Hybrid] Built BM25 index with {len(engine.all_chunks)} chunks")
+    logger.info(f"[Hybrid] Built BM25 index with {len(engine.all_chunks)} chunks")
     return engine.vectorstore, parent_docs
 
 def split_fixed_documents(docs, chunk_size = 600, chunk_overlap = 120):
@@ -503,7 +506,7 @@ def create_blocks(engine, block_size_chunks: int = 15, overlap_chunks: int = 3):
         engine.block_vectorstore = None
         return
 
-    print(f"[Blocks] Creating blocks from {len(engine.all_chunks)} chunks (Sliding Window)...")
+    logger.info(f"[Blocks] Creating blocks from {len(engine.all_chunks)} chunks (Sliding Window)...")
     blocks = []
     step = max(1, block_size_chunks - overlap_chunks)
     for i in range(0, len(engine.all_chunks), step):
@@ -529,7 +532,7 @@ def create_blocks(engine, block_size_chunks: int = 15, overlap_chunks: int = 3):
 
     engine.blocks = blocks
     engine.block_vectorstore = FAISS.from_documents(blocks, engine.embeddings)
-    print(f"[Blocks] Successfully built {len(blocks)} blocks.")
+    logger.info(f"[Blocks] Successfully built {len(blocks)} blocks.")
 
 
 def save_index(engine, folder_path="vector_db"):
@@ -567,7 +570,7 @@ def load_index(engine, folder_path="vector_db"):
             folder_path, engine.embeddings, allow_dangerous_deserialization=True
         )
     except Exception as e:
-        print(f"[Load] FAISS load error: {e}")
+        logger.info(f"[Load] FAISS load error: {e}")
         return False
 
     chunking_mode = "semantic"
@@ -611,5 +614,5 @@ def load_index(engine, folder_path="vector_db"):
 
     create_blocks(engine)
 
-    print(f"[Load] Index loaded with mode: {engine.chunking_mode}")
+    logger.info(f"[Load] Index loaded with mode: {engine.chunking_mode}")
     return True

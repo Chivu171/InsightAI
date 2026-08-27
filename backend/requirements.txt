@@ -4,7 +4,6 @@ numpy
 faiss-cpu
 requests
 python-dotenv
-streamlit
 PyMuPDF
 fastapi
 uvicorn
@@ -15,7 +14,9 @@ langchain-experimental>=0.3.0
 langchain-huggingface>=0.1.0
 langchain-core>=0.3.0
 langchain-text-splitters>=0.3.0
-google-genai
+# google-genai is optional — only needed if GOOGLE_API_KEY is set.
+# Install manually: `pip install google-genai`
+# google-genai
 openai
 docx2txt
 upstash-redis

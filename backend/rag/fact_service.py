@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from rag import generator
 from rag import retrieval
 
@@ -17,7 +21,7 @@ class FactService:
         # HyDE: only for academic papers (adds ~1 LLM call but improves recall)
         use_hyde = getattr(self.engine, "doc_type", "general") == "academic_paper"
         if use_hyde:
-            print("[FactService] Using HyDE for dense retrieval")
+            logger.info("[FactService] Using HyDE for dense retrieval")
             dense_results = retrieval.dense_retrieve_with_hyde(self.engine, user_query, k=k * 5)
         else:
             dense_results = retrieval.dense_retrieve(self.engine, user_query, k=k * 5)

@@ -1,6 +1,10 @@
+import logging
 import re
+
 import numpy as np
 from rank_bm25 import BM25Okapi
+
+logger = logging.getLogger(__name__)
 
 
 def tokenize(text: str) -> list[str]:
@@ -25,7 +29,7 @@ def dense_retrieve(engine, query: str, k: int = 10):
         results = engine.retriever.invoke(query)
         return results[:k]
     except Exception as e:
-        print(f"[Hybrid] Dense retrieval error: {e}")
+        logger.warning("[Hybrid] Dense retrieval error: %s", e)
         return []
 
 
@@ -48,9 +52,9 @@ def dense_retrieve_with_hyde(engine, query: str, k: int = 10) -> list:
         hypothetical = (generate_text(engine, hyde_prompt) or "").strip()
         if not hypothetical:
             raise ValueError("Empty HyDE response")
-        print(f"[HyDE] Hypothetical: {hypothetical[:120]}...")
+        logger.info("[HyDE] Hypothetical: %s...", hypothetical[:120])
     except Exception as e:
-        print(f"[HyDE] Falling back to standard dense retrieve: {e}")
+        logger.warning("[HyDE] Falling back to standard dense retrieve: %s", e)
         return dense_retrieve(engine, query, k)
 
     try:
@@ -58,7 +62,7 @@ def dense_retrieve_with_hyde(engine, query: str, k: int = 10) -> list:
         results = engine.vectorstore.similarity_search_by_vector(embedding, k=k)
         return results
     except Exception as e:
-        print(f"[HyDE] Vector search error, fallback: {e}")
+        logger.warning("[HyDE] Vector search error, fallback: %s", e)
         return dense_retrieve(engine, query, k)
 
 
@@ -103,11 +107,11 @@ def doc_debug_label(doc, max_len: int = 120) -> str:
 
 def log_retrieval_stage(stage: str, docs, query: str, limit: int = 5) -> None:
     if not docs:
-        print(f"[Retrieval:{stage}] no results for query={query!r}")
+        logger.info("[Retrieval:%s] no results for query=%r", stage, query)
         return
-    print(f"[Retrieval:{stage}] top {min(limit, len(docs))} for query={query!r}")
+    logger.info("[Retrieval:%s] top %s for query=%r", stage, min(limit, len(docs)), query)
     for idx, doc in enumerate(docs[:limit], start=1):
-        print(f"  {idx}. {doc_debug_label(doc)}")
+        logger.debug("  %s. %s", idx, doc_debug_label(doc))
 
 
 def docs_to_debug_items(docs, content_chars: int = 200):

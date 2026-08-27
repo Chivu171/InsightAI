@@ -34,6 +34,7 @@ class AppConfig:
     debug: bool = False
 
     cors_origins: list[str] = field(default_factory=list)
+    cors_origins_default: list[str] = field(default_factory=list)
     cors_allow_credentials: bool = True
     cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
     cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
@@ -65,9 +66,16 @@ class AppConfig:
         load_dotenv()
 
         cors_origins = _parse_csv(os.getenv("CORS_ORIGINS"))
+        cors_origins_default = _parse_csv(os.getenv("CORS_ORIGINS_DEFAULT"))
+        env = os.getenv("ENV", "development")
+
+        # Production defaults use Fly volume paths (/data/*)
+        vector_db_default = "/data/vector_db" if env == "production" else "vector_db"
+        upload_default = "/data/uploads" if env == "production" else "uploads"
 
         return cls(
             cors_origins=cors_origins,
+            cors_origins_default=cors_origins_default,
             google_api_key=os.getenv("GOOGLE_API_KEY"),
             google_model=os.getenv("GOOGLE_MODEL", "gemini-2.5-flash"),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -84,15 +92,15 @@ class AppConfig:
             lmstudio_base_url=os.getenv("LMSTUDIO_BASE_URL", "").rstrip("/"),
             lmstudio_model=os.getenv("LMSTUDIO_MODEL"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),
-            vector_db_path=os.getenv("VECTOR_DB_PATH", "vector_db"),
-            upload_dir=os.getenv("UPLOAD_DIR", "uploads"),
+            vector_db_path=os.getenv("VECTOR_DB_PATH", vector_db_default),
+            upload_dir=os.getenv("UPLOAD_DIR", upload_default),
             chunk_size=_parse_int(os.getenv("CHUNK_SIZE"), 600),
             chunk_overlap=_parse_int(os.getenv("CHUNK_OVERLAP"), 120),
             top_k=_parse_int(os.getenv("RETRIEVAL_TOP_K"), 3),
             max_turns=_parse_int(os.getenv("MAX_TURNS"), 15),
             rewrite_history_turns=_parse_int(os.getenv("REWRITE_HISTORY_TURNS"), 5),
             debug=_parse_bool(os.getenv("DEBUG"), False),
-            env=os.getenv("ENV", "development"),
+            env=env,
             upstash_redis_rest_url=os.getenv("UPSTASH_REDIS_REST_URL"),
             upstash_redis_rest_token=os.getenv("UPSTASH_REDIS_REST_TOKEN"),
             session_ttl_seconds=_parse_int(os.getenv("SESSION_TTL_SECONDS"), 86400),

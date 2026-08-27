@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from google import genai
+import logging
+
 from openai import OpenAI
 from sentence_transformers import CrossEncoder
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.stores import InMemoryStore
 from langchain_experimental.text_splitter import SemanticChunker
@@ -27,8 +30,20 @@ class RAGEngine:
         self.google_model = settings.google_model
         self.gemini_model = self.google_model
 
+        # Optional: google-genai SDK is only required if a Google API key is
+        # configured. Lazy-import so the package does not need to be installed
+        # when running on OpenRouter-only deployments.
         if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
+            try:
+                from google import genai  # type: ignore
+                self.client = genai.Client(api_key=self.api_key)
+            except ImportError:
+                logger.warning(
+                    "GOOGLE_API_KEY is set but `google-genai` is not installed. "
+                    "Gemini fallback will be unavailable. Install with: "
+                    "`pip install google-genai`"
+                )
+                self.client = None
 
         self.openrouter_api_key = settings.openrouter_api_key
         self.openrouter_model_api = settings.openrouter_model_api
@@ -85,8 +100,17 @@ class RAGEngine:
 
     # Indexing
     def clear_index(self):
-        self.conversation_store.clear()
+        """Reset RAG index state ONLY.
+
+        Does NOT clear the conversation store — sessions belong to users,
+        not to the document index. Use ``reset_session_store`` only on
+        explicit user-initiated full resets.
+        """
         return indexing.clear_index(self)
+
+    def reset_session_store(self):
+        """Wipe all conversation sessions (call only from admin reset endpoints)."""
+        self.conversation_store.clear()
 
     def extract_documents(self, file_obj):
         return indexing.extract_documents(self, file_obj)

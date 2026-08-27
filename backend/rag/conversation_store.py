@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import json
 from datetime import datetime, timezone
 
@@ -103,9 +107,9 @@ class ConversationStore:
                 ["EXPIRE", key, self.ttl_seconds],
             ]
         )
-        print("[Redis] append_turn response:", response)
+        logger.debug("[Redis] append_turn response: %s", response)
         for idx, item in enumerate(response):
-            print(f"[Redis] append_turn cmd {idx}:", item)
+            logger.debug("[Redis] append_turn cmd %s: %s", idx, item)
 
     def set_summary(self, session_id: str, summary: str) -> None:
         if self._use_memory_fallback():

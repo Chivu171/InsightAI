@@ -7,6 +7,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from config import settings
 from rag.engine import RAGEngine
 
 from ..deps import get_rag_engine
@@ -17,54 +18,58 @@ router = APIRouter(tags=["chat"])
 _DONE = object()  # sentinel for exhausted generator
 
 
-@router.get("/stream-test")
-async def stream_test():
-    """Dummy SSE endpoint — test async streaming."""
-    async def gen():
-        for i in range(10):
-            yield f"data: {json.dumps({'type': 'token', 'content': f'token-{i} '})}\n\n"
-            await asyncio.sleep(0.3)
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+# Debug / test endpoints — only available when NOT running in production.
+# Keeps noise out of logs and removes an info-leak surface from prod.
+if settings.env != "production":
 
-    return StreamingResponse(
-        gen(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    @router.get("/stream-test")
+    async def stream_test():
+        """Dummy SSE endpoint — test async streaming."""
 
+        async def gen():
+            for i in range(10):
+                yield f"data: {json.dumps({'type': 'token', 'content': f'token-{i} '})}\n\n"
+                await asyncio.sleep(0.3)
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-@router.get("/stream-test-sync")
-async def stream_test_sync():
-    """Test run_in_executor + sync generator — simulate blocking I/O."""
-    import time
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
-    def sync_gen():
-        for i in range(10):
-            time.sleep(0.3)  # simulate blocking token arrival
-            yield f"data: {json.dumps({'type': 'token', 'content': f'sync-{i} '})}\n\n"
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+    @router.get("/stream-test-sync")
+    async def stream_test_sync():
+        """Test run_in_executor + sync generator — simulate blocking I/O."""
+        import time
 
-    async def gen():
-        loop = asyncio.get_running_loop()
-        sg = sync_gen()
+        def sync_gen():
+            for i in range(10):
+                time.sleep(0.3)  # simulate blocking token arrival
+                yield f"data: {json.dumps({'type': 'token', 'content': f'sync-{i} '})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        def get_next():
-            try:
-                return next(sg)
-            except StopIteration:
-                return _DONE
+        async def gen():
+            loop = asyncio.get_running_loop()
+            sg = sync_gen()
 
-        while True:
-            item = await loop.run_in_executor(None, get_next)
-            if item is _DONE:
-                break
-            yield item
+            def get_next():
+                try:
+                    return next(sg)
+                except StopIteration:
+                    return _DONE
 
-    return StreamingResponse(
-        gen(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+            while True:
+                item = await loop.run_in_executor(None, get_next)
+                if item is _DONE:
+                    break
+                yield item
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
 
 @router.post("/queryHybrid")
