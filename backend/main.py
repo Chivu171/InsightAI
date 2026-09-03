@@ -12,6 +12,7 @@ from rag.engine import RAGEngine
 from api.routers.chat import router as chat_router
 from api.routers.documents import router as documents_router
 from api.routers.health import router as health_router
+from api.routers.metrics import router as metrics_router
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -67,4 +68,5 @@ app.state.rag_engine.load_index()
 app.include_router(health_router)
 app.include_router(documents_router)
 app.include_router(chat_router)
+app.include_router(metrics_router)
 

@@ -1,0 +1,152 @@
+[
+  {
+    "query": "RAG là gì và giải quyết vấn đề gì?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["retrieval-augmented generation", "hallucination", "parametric knowledge"],
+    "note": "Section 2 — định nghĩa RAG và motivation"
+  },
+  {
+    "query": "RAG pipeline gồm những bước nào?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["document ingestion", "embedding generation", "vector database", "similarity search", "context construction"],
+    "note": "Section 2 — 7 bước của RAG pipeline"
+  },
+  {
+    "query": "Vector embedding là gì?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["vector embeddings", "dense numerical", "semantic meaning", "euclidean"],
+    "note": "Section 3 — định nghĩa embedding"
+  },
+  {
+    "query": "Các kích thước embedding phổ biến là bao nhiêu?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["384", "512", "768"],
+    "note": "Section 3 — embedding dimensions"
+  },
+  {
+    "query": "FAISS là gì và hỗ trợ những chiến lược tìm kiếm nào?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["facebook ai similarity search", "exact search", "approximate nearest"],
+    "note": "Section 4 — FAISS overview"
+  },
+  {
+    "query": "FAISS có thể xử lý bao nhiêu vector?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["millions of vectors", "scalable"],
+    "note": "Section 4 — FAISS scalability"
+  },
+  {
+    "query": "RAG có những ứng dụng gì trong nghiên cứu học thuật?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["literature review", "policy analysis", "legal document", "scientific hypothesis"],
+    "note": "Section 5 — applications"
+  },
+  {
+    "query": "Những thách thức của RAG là gì?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["chunk size", "overlapping chunks", "embedding model quality", "alignment"],
+    "note": "Section 6 — limitations"
+  },
+  {
+    "query": "LLM truyền thống gặp hạn chế gì?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["parametric knowledge", "outdated", "incorrect"],
+    "note": "Section 1 — motivation"
+  },
+  {
+    "query": "Khoảng cách nào được dùng để đo độ tương đồng giữa các embedding?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["euclidean", "cosine similarity"],
+    "note": "Section 3 — distance metrics"
+  },
+  {
+    "query": "Các mô hình embedding phổ biến gồm những loại nào?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["sentence-bert", "transformer-based"],
+    "note": "Section 3 — common embedding models"
+  },
+  {
+    "query": "Kết luận chính của bài báo về RAG là gì?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["trustworthy ai", "retrieval mechanisms", "accurate", "context-aware"],
+    "note": "Section 7 — conclusion"
+  },
+  {
+    "query": "Retrieval-Augmented Generation kết hợp những thành phần nào?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["retrieval component", "external corpus", "generative models"],
+    "note": "Section 2 — components"
+  },
+  {
+    "query": "Tại sao cần chunking trong RAG?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["chunk size", "context continuity", "overlapping"],
+    "note": "Section 6 — chunking importance"
+  },
+  {
+    "query": "RAG giúp cải thiện vấn đề hallucination của LLM như thế nào?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["grounded", "factually consistent", "retrieved context"],
+    "note": "Section 2 — anti-hallucination"
+  },
+  {
+    "query": "Transformer architecture được nhắc đến trong ngữ cảnh nào?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["transformer-based", "language models", "question answering"],
+    "note": "Section 1 — transformer mention"
+  },
+  {
+    "query": "Làm sao FAISS hỗ trợ xây dựng hệ thống RAG scalable?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["scalable", "fast retrieval", "millions"],
+    "note": "Section 4 — FAISS for RAG"
+  },
+  {
+    "query": "Abstract của bài báo nói gì?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["recent advances", "academic research", "hallucination", "retrieval-augmented generation"],
+    "note": "Abstract section"
+  },
+  {
+    "query": "Có thể dùng RAG làm trợ lý học thuật không?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["academic assistants", "domain-specific", "precise answers"],
+    "note": "Section 5 — academic assistant"
+  },
+  {
+    "query": "Hệ thống RAG retrieve tài liệu từ đâu?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["external corpus", "retrieval component"],
+    "note": "Section 2 — external corpus"
+  },
+  {
+    "query": "Mục tiêu chính của RAG theo bài báo?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["factually consistent", "grounded", "retrieved context"],
+    "note": "Section 2 — goal"
+  },
+  {
+    "query": "Tại sao embedding model quality quan trọng?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["embedding model quality", "retrieval accuracy"],
+    "note": "Section 6 — model quality"
+  },
+  {
+    "query": "Hệ thống RAG sinh câu trả lời như thế nào sau khi retrieve?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["context construction", "answer generation", "llm"],
+    "note": "Section 2 — generation step"
+  },
+  {
+    "query": "AI giúp các nhà nghiên cứu xử lý thông tin ra sao?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["summarize literature", "extract insights", "generate hypotheses"],
+    "note": "Abstract — researcher workflow"
+  },
+  {
+    "query": "Vai trò của việc overlap giữa các chunk là gì?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["overlapping chunks", "context continuity"],
+    "note": "Section 6 — overlap"
+  }
+]

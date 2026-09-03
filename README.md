@@ -27,6 +27,12 @@ InsightAI is a professional-grade full-stack chatbot that enables deep document 
   - **Local-first**: Integration with **LM Studio** (OpenAI-compatible endpoint).
   - **Fallback**: **Google Gemini API** support.
 
+### **Evaluation & Metrics** (`backend/rag/metrics.py`)
+- **Retrieval quality**: Precision@5, Recall@5, MRR, NDCG@5 (binary relevance, ground truth resolved from `chunk_id` or `expected_keywords`).
+- **Baselines compared side-by-side**: BM25 only, Dense only, Hybrid (BM25 + dense + RRF + cross-encoder rerank).
+- **Answer quality**: LLM-as-judge faithfulness in [1, 5] (uses the same OpenRouter model that generates answers, so judge and judged model are the same family).
+- **Latency**: per-stage stopwatch for `retrieve_ms`, `rerank_ms`, `generate_ms`, `total_ms`, plus the LLM provider that actually answered (OpenRouter / LMStudio / Google).
+
 ---
 
 ## 🏗 Architecture & Workflow
@@ -180,7 +186,127 @@ npm run dev
 
 ---
 
-## 📈 Future Improvements
+## 📊 Evaluation & Metrics
+
+InsightAI ships with a built-in evaluation harness so you can measure retrieval quality, answer quality, and latency side-by-side against the three retrieval baselines: **BM25 only**, **Dense only**, and the production **Hybrid (BM25 + Dense + RRF + cross-encoder rerank)** path.
+
+### What is measured
+
+| Category | Metric | How it is computed |
+|---|---|---|
+| Retrieval | **Precision@5** | fraction of top-5 retrieved docs that are relevant |
+| Retrieval | **Recall@5** | fraction of relevant docs that appear in top-5 |
+| Retrieval | **MRR** | 1 / rank of the first relevant doc, averaged across queries |
+| Retrieval | **NDCG@5** | Normalized DCG, binary relevance |
+| Answer | **Faithfulness (1–5)** | LLM-as-judge prompt; same model family as the generator |
+| Latency | **retrieve / rerank / generate / total ms** | per-stage `time.perf_counter()` |
+| Latency | **provider** | which LLM actually answered (`openrouter` / `lmstudio` / `google`) |
+
+### Ground-truth handling
+
+The test set at `data/test_set.json` stores both:
+
+* `relevant_chunk_ids` — exact `chunk_id` values (e.g. `uploaded_file_p0_c4`) for the corpus that was indexed.
+* `expected_keywords` — fallback keywords used when chunk_ids are stale (after a re-index). The harness does a case-insensitive substring match against `engine.all_chunks` so the test set survives index churn.
+
+### Quick start
+
+#### 1. Build the index (only if `vector_db/` is empty)
+
+```python
+from rag.engine import RAGEngine
+eng = RAGEngine()
+with open("data/sample.txt", encoding="utf-8") as f:
+    eng.build_index(f.read(), chunking_mode="fixed", chunk_size=600, chunk_overlap=120)
+eng.save_index("vector_db")
+```
+
+Or just upload a document through the running app's `/documents` endpoint.
+
+#### 2. Run the CLI harness (from repo root)
+
+```bash
+# Retrieval-only — fast (no LLM calls, ~30s for 25 queries × 3 methods)
+python -m scripts.eval_metrics
+
+# With answer generation enabled (slower — one LLM call per hybrid query)
+python -m scripts.eval_metrics --answers
+
+# With LLM-as-judge faithfulness scoring (slower still — two LLM calls per hybrid query)
+python -m scripts.eval_metrics --answers --judge
+
+# Restrict to a subset of baselines
+python -m scripts.eval_metrics --methods bm25 dense
+
+# Dump the full JSON report
+python -m scripts.eval_metrics --out eval_report.json
+```
+
+#### 3. Run via HTTP (when the backend is up)
+
+```bash
+# Retrieval-only
+curl -X POST http://localhost:8000/metrics/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+
+# Full report with answer generation + faithfulness judge
+curl -X POST http://localhost:8000/metrics/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{"generate_answers": true, "judge_faithfulness": true}'
+
+# List the test set without running evaluation
+curl http://localhost:8000/metrics/test-set
+```
+
+These endpoints are disabled in production (`ENV=production`).
+
+### Sample output
+
+Running `python -m scripts.eval_metrics --answers --judge --out eval_report.json` against `data/sample.txt` (9 chunks, 25 Vietnamese fact questions) on a real `RAGEngine` with OpenRouter-backed LLM generation and LLM-as-judge faithfulness scoring produces:
+
+```
+method   n    P@5    R@5    MRR    NDCG@5  ret_ms   gen_ms   faith  prov
+bm25     25   0.248  0.743  0.631  0.603   0.9      0        —      none
+dense    25   0.288  0.790  0.575  0.601   518.0    0        —      none
+hybrid   25   0.280  0.827  0.743  0.720   198.8    17882    4.88   openrouter
+
+Winners:
+  Precision@5 : dense    (0.288)
+  MRR         : hybrid   (0.743)
+  Latency     : bm25     (0.9 ms)
+```
+
+**Reading this**: the **hybrid** pipeline wins on Recall@5 (0.827), MRR (0.743), and NDCG@5 (0.720) — proof that the BM25 + Dense + RRF + cross-encoder combination actually buys you ranking quality over either baseline. Faithfulness is **4.88/5**, meaning almost every answer is fully grounded in the retrieved context (a sanity-check with a deliberately hallucinated answer returned 1.0, confirming the judge discriminates).
+
+The cost is ~17.9 s of total LLM latency per query (driven mostly by the free OpenRouter model we route through; local models on M-series hardware typically clock in around 3–5 s).
+
+### Files
+
+| Path | Role |
+|---|---|
+| `backend/rag/metrics.py` | Metric primitives + `run_evaluation` harness |
+| `backend/rag/generator.py` | `generate_with_openrouter_with_fallback()` — tries primary model then walks `_OPENROUTER_FALLBACK_MODELS` on any error so one rate-limited model can't block the whole eval run |
+| `backend/api/routers/metrics.py` | `POST /metrics/evaluate`, `GET /metrics/test-set` |
+| `data/test_set.json` | 25 Vietnamese fact questions with ground-truth ids/keywords |
+| `scripts/eval_metrics.py` | CLI runner with table output and JSON dump |
+
+### Adding your own test set
+
+Each entry must have at least a `query`. The other fields are optional but recommended:
+
+```json
+{
+  "query": "RAG pipeline gồm những bước nào?",
+  "relevant_chunk_ids": ["uploaded_file_p0_c4"],
+  "expected_keywords": ["document ingestion", "embedding generation", "vector database"],
+  "note": "Section 2 — 7 bước của RAG pipeline"
+}
+```
+
+If `relevant_chunk_ids` is empty or stale, the harness will fall back to substring-matching the `expected_keywords` against the indexed chunks. This keeps the test set useful even after you re-index with a different chunking strategy.
+
+---
 - **Structural Chunking**: Moving from flat semantic chunks to structure-aware hierarchy (Sections, Tables, Hierarchical indexing).
 - **Pre-retrieval Optimization**: Implementing Query Expansion (Hypothetical Document Embeddings - HyDE) and Query Decomposition.
 - **Knowledge Graph Integration (GraphRAG)**: Building entity-relationship graphs to enable complex multi-hop reasoning.

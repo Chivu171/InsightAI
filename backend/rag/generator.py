@@ -82,6 +82,58 @@ def generate_with_openrouter(engine, prompt: str) -> str:
     return _extract_openai_content(response.choices[0].message)
 
 
+# Free-tier model fallback chain.  When the primary model is rate-limited or
+# slow, the harness walks this list in order.  All are :free (no cost) and
+# support Vietnamese.  Add/remove entries as OpenRouter rotates availability.
+_OPENROUTER_FALLBACK_MODELS = [
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "minimax/minimax-m2.7:free",
+    "inclusionai/ling-3.0-flash-fin:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "z-ai/glm-5.2:free",
+]
+
+
+def generate_with_openrouter_with_fallback(engine, prompt: str) -> tuple[str, str]:
+    """Try the configured model first, then walk ``_OPENROUTER_FALLBACK_MODELS``
+    on any error.  Returns ``(content, model_used)``.
+    """
+    if engine.openrouter_client is None:
+        raise RuntimeError("OpenRouter API key is not configured.")
+
+    tried: list[str] = []
+    candidates = [engine.openrouter_model_name] + [
+        m for m in _OPENROUTER_FALLBACK_MODELS
+        if m != engine.openrouter_model_name
+    ]
+
+    last_exc: Exception | None = None
+    for model_name in candidates:
+        tried.append(model_name)
+        try:
+            response = engine.openrouter_client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                timeout=60,  # hard ceiling per call; prevents one bad model
+                             # from blocking the whole eval run.
+            )
+            content = _extract_openai_content(response.choices[0].message)
+            if content:
+                return content, model_name
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[Generate] OpenRouter model %s failed (%s) — falling back",
+                model_name, exc.__class__.__name__,
+            )
+            last_exc = exc
+            continue
+
+    raise RuntimeError(
+        f"All OpenRouter models failed. Tried: {tried}. Last error: {last_exc}"
+    )
+
+
 def generate_with_google(engine, prompt: str) -> str:
     engine.api_key = settings.google_api_key or engine.api_key
     response = requests.post(
@@ -111,7 +163,8 @@ def generate_text(engine, prompt: str) -> str: # Kết hợp của 2 phương th
     """Generate text using OpenRouter first, then legacy local/Google fallbacks.""" # Máy phát text bằng LLM
     if engine.openrouter_client is not None:
         try:
-            return generate_with_openrouter(engine, prompt)
+            content, _ = generate_with_openrouter_with_fallback(engine, prompt)
+            return content
         except RateLimitError:
             return (
                 "OpenRouter dang rate-limit model mien phi "
